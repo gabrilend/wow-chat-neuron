@@ -220,6 +220,20 @@ function Deployment.load()
         db_characters  = databases.characters,
         db_playerbots  = databases.playerbots,
 
+        -- The auth database is NOT profile-suffixed. Accounts are shared
+        -- across every profile on the machine, which is why a bot account
+        -- created for one profile is visible from all of them.
+        db_auth        = "acore_auth",
+
+        -- How playerbot accounts are named. mod-playerbots creates its fleet
+        -- under a configurable prefix and RNDBOT is its default; the live
+        -- deployment has 2210 of them. This is a heuristic, not a fact the
+        -- schema records -- there is no "is a bot" column anywhere -- so a
+        -- human who names their account RNDBOTTLES would be misread. Stated
+        -- plainly rather than hidden, because a wrong answer here silently
+        -- puts a person in a roster meant for bots.
+        bot_account_prefix = config.bot_account_prefix or "RNDBOT",
+
         soap_url       = config.soap_url,
         soap_account   = config.soap_account,
         soap_password  = neuron_secrets.NEURON_SOAP_PASSWORD,

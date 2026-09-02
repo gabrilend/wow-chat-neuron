@@ -100,3 +100,52 @@ documents point at it rather than transcribing it.
 - `docs/architecture.md` — Liveness Is a First-Class Fact
 - Issue 104 — the guard that consumes `online`
 - Real table names confirmed against the deployment's own database directory
+
+## Three Kinds of Character, Not Two
+
+Verified against the live deployment, which holds 25,015 characters:
+
+| Kind | How it is recognised | Count when checked |
+|------|----------------------|--------------------|
+| **bot** | Its account's username starts with the playerbot prefix | 24,110 |
+| **person** | Its account exists and is not a bot account | 5 |
+| **orphan** | **It has no account row at all** | 900 |
+
+The third kind was not in the original design and is the important one.
+
+A character whose account row has been deleted still sits in the `characters`
+table. It belongs to nobody, cannot be logged in, and is invisible to any query
+that joins accounts with an INNER join. Nine hundred of them exist on the live
+deployment — residue from bot fleets that were removed by deleting accounts
+without deleting their characters.
+
+Two consequences the read layer must carry:
+
+- **The join to the auth database is LEFT, not INNER.** An inner join would make
+  orphans vanish from every query in the project, which is precisely how nine
+  hundred rows go unnoticed.
+- **Orphans are counted separately and never folded into either other number.**
+  The first version of the summary computed `people = characters - bots`, which
+  reported 905 people on a deployment with one human account holding five
+  characters. A silent category error does not look broken from the outside; it
+  looks like a number that is merely surprising, which is worse.
+
+The status board reports the orphan count as a **warning**, not a statistic,
+because per the standing project position a warning is an error and residue that
+nothing cleaned up is something somebody should decide about.
+
+This also validates phase 4's issue 404 in advance: "remove generated bots and
+their rows, **completely**" exists because doing it incompletely is what produced
+these nine hundred.
+
+## The Bot Heuristic, Stated Plainly
+
+There is no column anywhere that says "this is a bot". mod-playerbots creates
+its fleet under a configurable account-name prefix, and detection reads that
+prefix. It is a heuristic:
+
+- A human who names their account with the prefix reads as a bot.
+- A bot fleet created under a different prefix reads as people.
+
+The prefix is therefore configurable in `config/deployment.lua`, and the field is
+named for what it actually checks rather than for what it is being used to mean.

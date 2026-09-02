@@ -9,18 +9,17 @@ Nothing in this phase changes anything.
 
 | Issue | Title | Status |
 |-------|-------|--------|
-| 101 | Deployment handle and configuration | Done |
-| 102 | The cold hand — parameterised SQL | Done |
-| 103 | The live hand — GM commands over SOAP | Written, untested against a live server |
-| 104 | Liveness probes and the hand-availability matrix | Done |
-| 105 | Reading the world | Written, untested against a live database |
+| 101 | Deployment handle and configuration | Done, verified live |
+| 102 | The cold hand — parameterised SQL | Done, verified live |
+| 103 | The live hand — GM commands over SOAP | Written, untested — no worldserver running |
+| 104 | Liveness probes and the hand-availability matrix | Done, verified live |
+| 105 | Reading the world | Done, verified live |
 | 106 | Receipts | Not started |
 | 111 | The plain WotLK target platform | Not started; the work lands in the deployment |
 
-"Untested against a live server" is doing real work in that table. The deployment
-this points at currently has neither its MySQL nor its worldserver running, so
-the read layer and the live hand have been exercised only through their probe
-paths. Both need a run against a live target before they can be called done.
+The database was brought up and everything above except the live hand has now
+been exercised against 25,015 real characters. The live hand still needs a
+worldserver and a GM account password before it can be called anything.
 
 ## The journey
 
@@ -58,6 +57,42 @@ get one. Filling in the first eight entries turned up that `gobject add` is
 selection-addressed, which means phase 6 cannot spawn props over SOAP at all and
 must write `gameobject` rows through the cold hand. That is a phase-6 design
 decision discovered in phase 1, for the cost of writing down a field.
+
+**Bringing the database up found three things a stopped world could not.** The
+probe paths had all been exercised; none of the reading had. Within minutes of
+the socket answering:
+
+The group reader was a syntax error. `groups` is a reserved word in MySQL 8, and
+it had been backticked in one query and not the other. The statement looks
+perfectly ordinary right up until the server refuses it, which is the whole
+character of this class of bug — there is nothing to notice by reading.
+
+The placeholder-count check caught its author. A draft left a duplicated query
+in the summary with one placeholder and no values, and the bind step refused it
+by naming both counts and printing the statement. It failed at the point of the
+mistake rather than as a MySQL syntax error pointing at a character offset in a
+string nobody typed, which is exactly what that check was written for.
+
+And the deployment turned out to hold **three kinds of character, not two**.
+24,110 bots, 5 people, and 900 characters with no account row whatsoever —
+residue from bot fleets removed by deleting accounts without deleting their
+characters. The first summary computed people as characters-minus-bots and
+therefore reported 905 people on a server with one human account. That is what a
+silent category error looks like from outside: not obviously broken, merely
+surprising. Orphans are now their own count, the join that finds them is a LEFT
+join so they cannot vanish, and the status board reports them as a warning
+rather than a statistic, because residue nothing cleaned up is something
+somebody should decide about.
+
+That last one validates a phase-4 ticket a phase early. Issue 404 says "remove
+generated bots and their rows, **completely**", and the emphasis was a guess when
+it was written. Nine hundred rows say it was the right guess.
+
+**A judgment call worth recording.** Bot detection reads the account-name prefix,
+because nothing in the schema records that a character is a bot. It is a
+heuristic and it is documented as one at the point where it is applied, rather
+than being allowed to read as a fact. The prefix is configurable for the same
+reason.
 
 ## Open questions carried forward
 

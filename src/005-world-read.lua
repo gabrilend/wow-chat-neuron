@@ -9,15 +9,15 @@
 -- produces data, operations consume it, and neither knows how the other works.
 --
 -- ONE FIELD MATTERS MORE THAN THE REST. Every character record carries `online`,
--- whether or not the caller asked for it, because forgetting to read it is
--- exactly the mistake 004-liveness.lua exists to prevent. It is not optional and
--- it is not lazy-loaded.
+-- whether or not the caller asked, because forgetting to read it is exactly the
+-- mistake 004-liveness.lua exists to prevent. It is not optional and it is not
+-- lazy-loaded.
 --
 -- POSITION IS A CLAIM, NOT A FACT. For an OFFLINE character the row is
 -- authoritative; nothing else holds their position. For an ONLINE character the
 -- row is a stale snapshot from the last save, and the real position is in the
--- worldserver's memory. Records therefore carry `position_is_stale` so a caller
--- reasoning about where somebody actually is cannot forget which case it has.
+-- worldserver's memory. Records carry `position_is_stale` so a caller reasoning
+-- about where somebody actually is cannot forget which case it has.
 --
 -- See issues/105-reading-the-world.md for the blueprint.
 --------------------------------------------------------------------------------
@@ -30,7 +30,7 @@ local function sibling(neuron_root, filename)
 end
 -- }}}
 
--- {{{ RACES / CLASSES / GENDERS
+-- {{{ RACES / CLASSES / GENDERS / MAPS
 -- Dispatch tables rather than if-else chains, per the standing project
 -- position: referring to data by index is cheaper than walking comparisons, and
 -- a table is a thing you can print, count, and check for holes.
@@ -39,8 +39,8 @@ end
 -- reserved and unused in 3.3.5a. Class 10 does not exist. A nil lookup here
 -- means "this game has no such thing", which is different from "we forgot".
 WorldRead.RACES = {
-    [1]  = "Human",   [2]  = "Orc",     [3]  = "Dwarf",  [4] = "Night Elf",
-    [5]  = "Undead",  [6]  = "Tauren",  [7]  = "Gnome",  [8] = "Troll",
+    [1]  = "Human",     [2]  = "Orc",    [3]  = "Dwarf", [4] = "Night Elf",
+    [5]  = "Undead",    [6]  = "Tauren", [7]  = "Gnome", [8] = "Troll",
     [10] = "Blood Elf", [11] = "Draenei",
 }
 
@@ -52,8 +52,6 @@ WorldRead.CLASSES = {
 
 WorldRead.GENDERS = { [0] = "male", [1] = "female" }
 
--- Map ids. Only the four that exist as continents in 3.3.5a; instance maps are
--- numerous and are looked up from the world database when they are ever needed.
 WorldRead.MAPS = {
     [0]   = "Eastern Kingdoms",
     [1]   = "Kalimdor",
@@ -65,25 +63,61 @@ WorldRead.MAPS = {
 -- {{{ CHARACTER_COLUMNS
 -- The exact columns a character record is built from, in one place, so the
 -- SELECT and the record shape cannot drift apart.
+--
+-- Aliased to `c` because every character read joins the auth database for the
+-- account name, and `guid` is a column in both tables.
 local CHARACTER_COLUMNS =
-    "guid, name, account, race, class, gender, level, online, "
- .. "map, zone, position_x, position_y, position_z, orientation"
+    "c.guid, c.name, c.account, c.race, c.class, c.gender, c.level, c.online, "
+ .. "c.map, c.zone, c.position_x, c.position_y, c.position_z, c.orientation, "
+ .. "a.username AS account_name"
 -- }}}
 
--- {{{ to_character(row)
+-- {{{ character_source(handle)
+-- The FROM clause every character read shares.
+--
+-- The join reaches into the AUTH database, which is deliberately not
+-- profile-suffixed: accounts are shared across every profile on the machine,
+-- which is why a bot account created for one profile is visible from all of
+-- them.
+--
+-- LEFT rather than INNER. A character whose account row has been deleted is
+-- orphaned data, and orphaned data should stay readable so somebody can find it
+-- and decide what to do about it -- an inner join would make it vanish from
+-- every query in the project, which is how orphans go unnoticed for years.
+local function character_source(handle)
+    return " FROM characters c LEFT JOIN " .. handle.db_auth
+        .. ".account a ON a.id = c.account "
+end
+-- }}}
+
+-- {{{ to_character(row, handle)
 -- Map one database row onto a character record.
 --
 -- `online` is converted to a real Lua boolean here rather than left as the
 -- database's 0/1. The reason is not tidiness: `if row.online then` is TRUE for
 -- the number 0, so a caller that forgot to compare against 1 would treat every
--- offline character as online and every guard would misfire in the safe
+-- offline character as online. Every guard would then misfire in the safe
 -- direction, which is the kind of bug that hides for months.
-local function to_character(row)
-    local online = tonumber(row.online) == 1
+local function to_character(row, handle)
+    local online       = tonumber(row.online) == 1
+    local account_name = row.account_name and tostring(row.account_name) or nil
+
+    -- A HEURISTIC, not a recorded fact. Nothing in the schema says "this is a
+    -- bot"; mod-playerbots simply creates its fleet under a configurable name
+    -- prefix, and the live deployment has 2210 accounts under the default one.
+    -- A person who names their account RNDBOTTLES would read as a bot. Stated
+    -- plainly rather than hidden, because a wrong answer here silently puts a
+    -- person into a roster meant for machines.
+    local prefix = handle.bot_account_prefix
+    local is_bot = account_name ~= nil
+               and account_name:sub(1, #prefix) == prefix
+
     return {
         guid    = tonumber(row.guid),
         name    = row.name,
         account = tonumber(row.account),
+        account_name = account_name,
+        is_bot  = is_bot,
 
         race    = tonumber(row.race),
         class   = tonumber(row.class),
@@ -111,7 +145,7 @@ end
 -- }}}
 
 -- {{{ WorldRead.character_by_name(handle, name)
--- One character by name, or nil.
+-- One character by name, or nil plus a reason.
 --
 -- Names are unique per realm and this deployment runs one realm, so a name is a
 -- usable key for a person typing at a terminal. GUIDs remain the key for
@@ -120,7 +154,8 @@ end
 function WorldRead.character_by_name(handle, name)
     local cold = sibling(handle.neuron_root, "002-cold-hand.lua")
     local rows, why = cold.read(handle, handle.db_characters,
-        "SELECT " .. CHARACTER_COLUMNS .. " FROM characters WHERE name = ?", { name })
+        "SELECT " .. CHARACTER_COLUMNS .. character_source(handle) .. "WHERE c.name = ?",
+        { name })
 
     if not rows then
         return nil, why
@@ -128,7 +163,7 @@ function WorldRead.character_by_name(handle, name)
     if #rows == 0 then
         return nil, "no character named '" .. tostring(name) .. "'"
     end
-    return to_character(rows[1])
+    return to_character(rows[1], handle)
 end
 -- }}}
 
@@ -139,10 +174,9 @@ end
 -- forty. That is the entire reason 002-cold-hand.lua exposes a placeholder-list
 -- builder.
 --
--- Names that matched nothing are returned separately rather than silently
+-- Names that matched nothing come back in `missing` rather than being silently
 -- dropped. A caller asking for forty characters and receiving thirty-eight must
--- be told which two are missing, or it will move thirty-eight people and report
--- success.
+-- be told which two, or it moves thirty-eight people and reports success.
 function WorldRead.characters_by_name(handle, names)
     if #names == 0 then
         return {}, {}
@@ -150,24 +184,61 @@ function WorldRead.characters_by_name(handle, names)
 
     local cold = sibling(handle.neuron_root, "002-cold-hand.lua")
     local rows, why = cold.read(handle, handle.db_characters,
-        "SELECT " .. CHARACTER_COLUMNS .. " FROM characters WHERE name IN ("
-            .. cold.placeholders(#names) .. ") ORDER BY name",
+        "SELECT " .. CHARACTER_COLUMNS .. character_source(handle)
+            .. "WHERE c.name IN (" .. cold.placeholders(#names) .. ") ORDER BY c.name",
         names)
 
     if not rows then
         return nil, why
     end
 
-    local found, by_name = {}, {}
+    local found, seen = {}, {}
     for _, row in ipairs(rows) do
-        local character = to_character(row)
+        local character = to_character(row, handle)
         table.insert(found, character)
-        by_name[character.name] = true
+        seen[character.name] = true
     end
 
     local missing = {}
     for _, wanted in ipairs(names) do
-        if not by_name[wanted] then
+        if not seen[wanted] then
+            table.insert(missing, wanted)
+        end
+    end
+
+    return found, missing
+end
+-- }}}
+
+-- {{{ WorldRead.characters_by_guid(handle, guids)
+-- The same, keyed by GUID. Used by anything replaying a receipt, since a
+-- receipt records GUIDs -- a name in a receipt could have been given to a
+-- different character since.
+function WorldRead.characters_by_guid(handle, guids)
+    if #guids == 0 then
+        return {}, {}
+    end
+
+    local cold = sibling(handle.neuron_root, "002-cold-hand.lua")
+    local rows, why = cold.read(handle, handle.db_characters,
+        "SELECT " .. CHARACTER_COLUMNS .. character_source(handle)
+            .. "WHERE c.guid IN (" .. cold.placeholders(#guids) .. ") ORDER BY c.name",
+        guids)
+
+    if not rows then
+        return nil, why
+    end
+
+    local found, seen = {}, {}
+    for _, row in ipairs(rows) do
+        local character = to_character(row, handle)
+        table.insert(found, character)
+        seen[character.guid] = true
+    end
+
+    local missing = {}
+    for _, wanted in ipairs(guids) do
+        if not seen[tonumber(wanted)] then
             table.insert(missing, wanted)
         end
     end
@@ -179,15 +250,16 @@ end
 -- {{{ WorldRead.characters_online(handle)
 -- Every character the database believes is logged in.
 --
--- "believes" is doing work in that sentence. With the worldserver DOWN, this
--- flag is whatever it was when the server stopped -- a server that crashed
--- leaves characters marked online forever. So the answer is only meaningful
--- when the world is up, and callers that use it for the liveness guard already
--- know that, because the guard only consults it when the world is up.
+-- "believes" is doing work in that sentence. With the worldserver DOWN this flag
+-- is whatever it was when the server stopped, and a server that crashed leaves
+-- characters marked online forever. So the answer is only meaningful when the
+-- world is up -- which the liveness guard already knows, because it only
+-- consults this when the world is up.
 function WorldRead.characters_online(handle)
     local cold = sibling(handle.neuron_root, "002-cold-hand.lua")
     local rows, why = cold.read(handle, handle.db_characters,
-        "SELECT " .. CHARACTER_COLUMNS .. " FROM characters WHERE online = 1 ORDER BY name")
+        "SELECT " .. CHARACTER_COLUMNS .. character_source(handle)
+            .. "WHERE c.online = 1 ORDER BY c.name")
 
     if not rows then
         return nil, why
@@ -195,7 +267,7 @@ function WorldRead.characters_online(handle)
 
     local characters = {}
     for _, row in ipairs(rows) do
-        table.insert(characters, to_character(row))
+        table.insert(characters, to_character(row, handle))
     end
     return characters
 end
@@ -204,21 +276,26 @@ end
 -- {{{ WorldRead.groups(handle)
 -- Every party, with its members, regardless of login state.
 --
--- Two tables: `groups` holds the party and its leader, `group_member` holds one
--- row per member. Reading both and joining in Lua rather than in SQL keeps the
--- member ordering under our control -- `subgroup` and `memberFlags` matter for
--- raid layout later, and a JOIN that flattens them loses that.
+-- `groups` is BACKTICKED because it is a reserved word in MySQL 8. Without the
+-- backticks this query is a syntax error, and it is the kind that only shows up
+-- against a live database -- the statement looks perfectly ordinary right up
+-- until the server refuses it.
+--
+-- Two reads rather than a JOIN, joined in Lua, so member ordering stays under
+-- our control: `subgroup` matters for raid layout later, and a flattening JOIN
+-- loses it.
 function WorldRead.groups(handle)
     local cold = sibling(handle.neuron_root, "002-cold-hand.lua")
 
     local group_rows, why = cold.read(handle, handle.db_characters,
-        "SELECT guid, leaderGuid, lootMethod, difficulty FROM groups ORDER BY guid")
+        "SELECT guid, leaderGuid, lootMethod, difficulty FROM `groups` ORDER BY guid")
     if not group_rows then
         return nil, why
     end
 
     local member_rows, member_why = cold.read(handle, handle.db_characters,
-        "SELECT guid, memberGuid, memberFlags, subgroup FROM group_member ORDER BY guid, subgroup")
+        "SELECT guid, memberGuid, memberFlags, subgroup FROM group_member "
+            .. "ORDER BY guid, subgroup")
     if not member_rows then
         return nil, member_why
     end
@@ -234,9 +311,9 @@ function WorldRead.groups(handle)
 
     for _, row in ipairs(member_rows) do
         local group = by_group[tonumber(row.guid)]
-        -- A member row whose group row is absent is orphaned data. It is
-        -- skipped rather than crashing, and it is worth knowing about -- but
-        -- reporting it is the validator's job, not this reader's.
+        -- A member row whose group row is absent is orphaned data. Skipped
+        -- rather than crashing; reporting it is a validator's job, not a
+        -- reader's.
         if group then
             table.insert(group.members, {
                 guid     = tonumber(row.memberGuid),
@@ -259,18 +336,27 @@ end
 -- The counts the status board prints.
 --
 -- This function IS the numbers. Per the standing project position, documentation
--- must not carry statistics -- "there are 214 characters" is wrong the moment
+-- must not carry statistics -- "there are 25015 characters" is wrong the moment
 -- somebody makes another one. Documents point here instead.
+--
+-- The bot count comes from the account-name prefix, which is a heuristic and is
+-- described as such where it is applied in to_character. The LIKE pattern is a
+-- BIND VALUE rather than pasted in, so a prefix containing a percent sign
+-- cannot silently turn into a wildcard and count everything.
 function WorldRead.summary(handle)
     local cold = sibling(handle.neuron_root, "002-cold-hand.lua")
 
-    local rows, why = cold.read(handle, handle.db_characters, [[
-        SELECT
-            (SELECT COUNT(*) FROM characters)               AS characters,
-            (SELECT COUNT(*) FROM characters WHERE online=1) AS online,
-            (SELECT COUNT(*) FROM `groups`)                  AS parties,
-            (SELECT COUNT(DISTINCT account) FROM characters)  AS accounts
-    ]])
+    local rows, why = cold.read(handle, handle.db_characters,
+        "SELECT"
+     .. "  (SELECT COUNT(*) FROM characters)                  AS characters,"
+     .. "  (SELECT COUNT(*) FROM characters WHERE online = 1) AS online,"
+     .. "  (SELECT COUNT(*) FROM `groups`)                    AS parties,"
+     .. "  (SELECT COUNT(DISTINCT account) FROM characters)   AS accounts,"
+     .. "  (SELECT COUNT(*) FROM characters c JOIN " .. handle.db_auth .. ".account a"
+     .. "     ON a.id = c.account WHERE a.username LIKE ?)    AS bots,"
+     .. "  (SELECT COUNT(*) FROM characters c LEFT JOIN " .. handle.db_auth .. ".account a"
+     .. "     ON a.id = c.account WHERE a.id IS NULL)         AS orphans",
+        { handle.bot_account_prefix .. "%" })
 
     if not rows then
         return nil, why
@@ -279,29 +365,48 @@ function WorldRead.summary(handle)
         return nil, "the summary query returned no rows, which should be impossible"
     end
 
+    local row = rows[1]
     return {
-        characters = tonumber(rows[1].characters),
-        online     = tonumber(rows[1].online),
-        parties    = tonumber(rows[1].parties),
-        accounts   = tonumber(rows[1].accounts),
+        characters = tonumber(row.characters),
+        online     = tonumber(row.online),
+        parties    = tonumber(row.parties),
+        accounts   = tonumber(row.accounts),
+        bots       = tonumber(row.bots),
+
+        -- Orphans are counted SEPARATELY and never folded into either other
+        -- number. A character whose account row has been deleted is neither a
+        -- bot nor a person; it is residue. On the live deployment there are 900
+        -- of them, and quietly counting them as people made the people count
+        -- wrong by two orders of magnitude -- which is what a silent category
+        -- error looks like from the outside: a number that is merely surprising
+        -- rather than obviously broken.
+        orphans    = tonumber(row.orphans),
+
+        -- Characters on a real, existing, non-bot account. The only number here
+        -- that means "somebody plays this".
+        people     = tonumber(row.characters)
+                     - tonumber(row.bots)
+                     - tonumber(row.orphans),
     }
 end
 -- }}}
 
+
 -- {{{ WorldRead.describe_character(character)
 -- One character as a line a person can read.
 --
--- Race and class are printed as words. A reader should never have to know that
--- class 4 is a Rogue, and the project's standing position is that naming a
--- thing in English beats naming it by its code.
+-- Race and class print as words. A reader should never have to know that class 4
+-- is a Rogue; the project's standing position is that naming a thing in English
+-- beats naming it by its code.
 function WorldRead.describe_character(character)
     local where = WorldRead.MAPS[character.map] or ("map " .. tostring(character.map))
-    return string.format("%-14s %-3d %-10s %-10s %-7s %s%s",
+    return string.format("%-14s %-3d %-10s %-13s %-7s %-4s %s%s",
         character.name,
         character.level,
-        character.race_name  or ("race " .. tostring(character.race)),
+        character.race_name  or ("race "  .. tostring(character.race)),
         character.class_name or ("class " .. tostring(character.class)),
         character.online and "online" or "offline",
+        character.is_bot and "bot" or "you",
         where,
         character.position_is_stale and "  (position is a stale snapshot)" or "")
 end

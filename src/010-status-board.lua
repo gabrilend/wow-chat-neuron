@@ -71,9 +71,26 @@ if not summary then
 end
 
 print(string.format("characters   %d", summary.characters))
+print(string.format("  bots       %d", summary.bots))
+print(string.format("  people     %d", summary.people))
+print(string.format("  orphans    %d", summary.orphans))
 print(string.format("accounts     %d", summary.accounts))
 print(string.format("parties      %d", summary.parties))
 print(string.format("online now   %d", summary.online))
+
+-- Orphans are reported as a WARNING rather than as a statistic, because a
+-- character whose account no longer exists is residue that something failed to
+-- clean up, and the project's standing position is that a warning is an error.
+-- Naming it here is how it stops being invisible.
+if summary.orphans > 0 then
+    print("")
+    print(string.format(
+        "WARNING: %d characters have no account row. Their accounts were",
+        summary.orphans))
+    print("         deleted and the characters were left behind. They belong to")
+    print("         nobody, cannot be logged in, and will be counted by any")
+    print("         roster that selects on anything except account.")
+end
 
 if summary.online > 0 then
     rule("who is playing")
