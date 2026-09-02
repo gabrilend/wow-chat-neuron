@@ -1,0 +1,41 @@
+#!/bin/bash
+# status
+#
+# Reports on the game world this copy of neuron is pointed at: which deployment,
+# which profile, whether its database and its game server are running, and -- if
+# they are -- how many characters exist and how many people are currently
+# playing.
+#
+# This is the tool you run first when something is not working. It names the
+# service that is down and the one thing to do about it, rather than leaving you
+# to infer that from a failure somewhere else.
+#
+# Usage:
+#   scripts/status              report on the configured deployment
+#   scripts/status /path/to/neuron   run against a different neuron checkout
+
+set -euo pipefail
+
+# {{{ set_dir
+DIR="/mnt/mtwo/games/azeroth-core/wow-chat-neuron"
+if [[ -n "${1:-}" && -d "${1:-}" ]]; then
+    DIR="$1"
+    shift
+fi
+# }}}
+
+# {{{ paths
+STATUS_LUA="${DIR}/src/010-status-board.lua"
+SHARED_MEMORY="${DIR}/tmp/shared-memory"
+# }}}
+
+# {{{ ensure_shared_memory
+# The shared-memory tier is RAM and does not survive a reboot, so anything that
+# writes there must be prepared to find it missing. Creating it here means every
+# entry point can assume it exists.
+mkdir -p "${SHARED_MEMORY}/receipts"
+# }}}
+
+# {{{ run
+exec luajit "${STATUS_LUA}" "${DIR}"
+# }}}

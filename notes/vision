@@ -1,0 +1,228 @@
+# wow-chat-neuron — Vision
+
+*A branch of wow-chat-2026. Where that project built a world, this one builds
+a hand that reaches into it.*
+
+## What This Is
+
+Everland Ghostsong (wow-chat-2026) is a world that runs. It has a server, an
+emptied-out map, companions that wander it, timers that fill it with danger and
+treasure. It is a game, and it works.
+
+wow-chat-neuron is not a second game. It is the thing you talk to about the
+first one.
+
+You type a sentence. Something in the world changes.
+
+    "put everyone in my guild on the Ratchet dock"
+    "give the three of them the same axe and mail set"
+    "make a party out of me, Grast, and Wenna, and hold the ridge while I'm gone"
+    "spin up four more bots around level 14, rogues and hunters"
+    "generate a black obelisk I can walk on, floating just off the ground,
+     and several more I can jump between"
+
+None of those are commands in any command language. They are requests. The
+work of turning a request into a change is the entire project.
+
+## The Name
+
+A neuron takes a signal in and fires a signal out. It does not decide what the
+signal means; it decides whether the conditions to fire have been met, and then
+it fires, and the meaning is somewhere else, in the shape of the whole net.
+
+That is the correct amount of ambition for this layer. It is not the game. It
+is not an author. It is the place where a sentence becomes a state change.
+
+## The Governing Constraint
+
+The model never writes code. It never writes SQL. It never runs a shell
+command. It never touches a file path of its own choosing.
+
+It picks from a closed set of named operations with typed parameters, and the
+operations do the work.
+
+This position is inherited, not invented. It was written down a year earlier in
+wow-chat-2026's `notes/wow-chat-secretary-2`, and it is still right:
+
+> an LLM should have levers to pull, not timestamps to clobber and crush. if it
+> could place files anywhere, it could be hacked. It's just a security concern,
+> and it violates the bot's autonomy. [...] they can just pull pre-defined
+> levers.
+>
+> that sort of thing makes them... not a real target. Because they can't do
+> harm, so why bother trying to break them?
+
+Read that as a security argument and it is a good one. Read it as a design
+argument and it is a better one. A closed set of named operations with typed
+parameters is a **vocabulary**. A vocabulary with a grammar is a **language**.
+Building a small language inside the constraints of a system you do not own is
+the whole craft. The safety property falls out of the design property for free;
+we did not have to trade anything for it.
+
+So the deliverable is not "an AI that plays with the database." The deliverable
+is **a language for describing changes to a running world**, plus an interpreter
+for it, plus — last and least important — a model that happens to be fluent.
+
+## The Three Hands
+
+A change reaches the world through one of three channels. Every operation
+declares which hand it needs, and that declaration is what makes the operation
+honest about when it can and cannot run.
+
+### The cold hand — SQL
+
+Direct writes to the character, world, and playerbot databases through the
+project-local MySQL socket.
+
+- Works while the server is **down**, which is the only time some facts can be
+  changed at all — a running worldserver holds character state in memory and
+  will happily overwrite the row you just edited when the player logs out.
+- Can express things no command exists for.
+- Nothing is visible until the server reads the row.
+
+### The live hand — GM commands over SOAP
+
+The worldserver's built-in SOAP console, bound to loopback, authenticated as a
+real game account with GM rank. Every dot-command a GM could type into the
+console is reachable over HTTP from a script.
+
+- Works only while the server is **up**.
+- Changes are instant and visible to everyone standing there.
+- Limited to the vocabulary AzerothCore already ships, which is large.
+
+wow-chat-2026 already turned this on and wrote down why, in
+`config/patches/C021-soap-loopback-console.sh`. neuron consumes that decision
+rather than re-litigating it.
+
+### The resident hand — ALE Lua inside the worldserver
+
+Some things are not a change; they are a *standing behavior*. A garrison that
+holds a ridge, fights, dies, respawns, and walks back to the same ridge is not
+one edit — it is a rule that keeps applying. Rules that keep applying have to
+live inside the process that runs the world.
+
+- Works only while the server is up, and runs on the server's tick budget.
+- Hot-reloadable, because ALE reloads Lua.
+- This is the only hand that can react to something happening.
+
+## What Gets Built, In Order of Foundation
+
+Phases are grouped by **effect** — what becomes true once the phase lands —
+rather than by the order anyone happened to build them. Lower numbers are more
+foundational; things above them assume things below them work.
+
+| Phase | Once it lands...                                          |
+|-------|-----------------------------------------------------------|
+| 1     | The world is addressable                                  |
+| 2     | Anyone can be anywhere                                    |
+| 3     | Anyone can be wearing anything                            |
+| 4     | Nobody is alone, and a group outlives its members         |
+| 5     | A character can change without being replaced             |
+| 6     | The world gains architecture the map files never had      |
+| 7     | The operations become a vocabulary a machine can speak    |
+| 8     | The vocabulary can be spoken by asking                    |
+| 9     | Asking works from inside the game                         |
+| 10    | Changes to the world become story                         |
+| 11    | What was made here can be made again elsewhere            |
+
+Phases 1 through 6 are hands and levers, and they are worth having on their own
+— a person typing `neuron teleport roster.guild ratchet-dock` gets value from
+phase 2 with no model involved anywhere. Phase 7 is where those levers become
+describable. Phase 8 is where a sentence starts working. Phases 9 and 10 are
+where it stops feeling like tooling.
+
+The ordering has a deliberate consequence: **if the model half is never built,
+the project is still useful.** That is the test of whether the levers were
+designed properly.
+
+## Style Preference Evolution
+
+Bots are not generated once and kept. They are *renewed*.
+
+A bot has a level, a class, a set of equipment, and — the part that does not
+exist yet anywhere — a **style**: the accumulated record of what this character
+has tended toward. Not a personality paragraph. A vector of leanings, built out
+of what the character has actually been given and actually done.
+
+Renewal means taking an existing character and moving it: up a few levels, or
+down, re-outfitted, re-specced, with its style nudged rather than rerolled. The
+same character, later. Not a replacement wearing the same name.
+
+The reason to care: a party you have played with for a month should be
+*recognizable*, and should also not be the same as it was a month ago. Those
+two requirements are in tension and the tension is the feature.
+
+## The Garrison
+
+When a party contains a character whose player has logged out, the party does
+not dissolve and the remaining bots do not go home.
+
+They hold the position.
+
+> the bots will remain online and guarding that position, even though the
+> player NPC is missing. If an enemy approaches they will fight to the last,
+> and when they come back to respawn they will defend the same position. Until
+> the player from the group re-logs back in, or the server goes down.
+
+No stand-in is spawned for the absent player. There is no mirror image, no
+puppet, no sleeping body. There is a gap in the party where a person was, and
+a watch that keeps standing in a place because that person said to stand there.
+
+The absence is the point. You come back and they are still there, and some of
+them died while you were gone.
+
+## Construction
+
+The world's geometry comes from map files that were compiled in 2008 and cannot
+be edited. But gameobjects can be placed anywhere, at any height, at any scale,
+and in 3.3.5a the **client** computes collision against a gameobject's model
+locally. A platform spawned in mid-air is standable the instant it appears,
+without the server's vmaps knowing anything about it.
+
+That single fact is what makes "a black obelisk I can walk on, floating next to
+the ground" a cheap request instead of an impossible one. It also sets the
+limit: server-side pathfinding does not know the platform is there, so NPCs
+will not walk onto it. Players can. Bots, mostly, cannot.
+
+Construction operations therefore work in **arrangements**, not single objects:
+a line of platforms with gaps small enough to jump, a ring, a stair, a scatter.
+The arrangement is computed; the placement is a loop; the request that produced
+it was one sentence.
+
+## Narration
+
+The last phase, and the one that justifies the rest.
+
+Once the world can be rearranged by asking, a GM character can narrate the
+rearrangement as it happens — not describing a database write, but describing
+the thing the database write means:
+
+> ... and then a horde of skeletons appeared, and we fought them for their gold
+> teeth. If we take them back to camp then there's a lady who can turn each one
+> into an animated skeleton by using earth magic to build out copies of bones,
+> using the elemental properties of the gold token to
+
+The sentence is unfinished. That is how the fragment was given and that is how
+it is kept. Narration is not a summary written after the fact; it is a thing
+said while the thing is still happening, which is why it can trail off.
+
+The mechanical reading: a narration operation takes a world change and a voice,
+and emits text into a channel as a named character. The evocative reading is the
+one above, and it is the reason the mechanical one is worth building.
+
+## Non-Goals
+
+- **Not a second server.** neuron attaches to a deployment. It does not build,
+  patch, or install AzerothCore. wow-chat-2026 does that and does it well.
+- **Not arbitrary execution.** No shell, no eval, no generated SQL, no scripts
+  written at request time. If an operation does not exist, the answer is that
+  the operation does not exist.
+- **Not a game design layer.** neuron changes the state of a world. What the
+  world *is* remains wow-chat-2026's question.
+- **Not a product.** As ever, the interest is in software design.
+
+## The Promise
+
+The levers should be good enough that pulling them by hand is satisfying.
+
+Then the asking is a gift, not a crutch.

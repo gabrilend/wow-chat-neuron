@@ -1,0 +1,6 @@
+# docs/ale/ contents are downloaded from upstream (azerothcore/eluna#main)
+# by ./download.sh. Only the script and this gitignore are tracked; every-
+# thing else is a synced copy of someone else's repo and not ours to track.
+*
+!download.sh
+!.gitignore

@@ -1,0 +1,23 @@
+# neuron is a control plane. It builds nothing, so there are no build artifacts
+# to ignore -- almost everything here is either source or writing, and tracked.
+
+# Secrets. Only one lives here: the GM account password for the live hand.
+secrets.conf
+!secrets.conf.example
+
+# The RAM-backed temp tiers. tmp/ is a symlink to /tmp/wow-chat-neuron (the
+# executable tier); tmp/shared-memory is a further symlink to
+# /dev/shm/wow-chat-neuron (the artifact tier, where receipts and logs go).
+# Neither survives a reboot and neither belongs in git.
+tmp
+tmp/
+
+# The ALE API documentation is fetched, not authored. docs/ale/download.sh
+# retrieves it; only the downloader is tracked.
+docs/ale/docs/
+
+# Editor and OS leavings
+*.swp
+*.swo
+*~
+.DS_Store
