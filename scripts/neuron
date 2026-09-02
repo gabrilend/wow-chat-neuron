@@ -1,0 +1,41 @@
+#!/bin/bash
+# neuron
+#
+# The command line for operating on a running game world: find places, work out
+# which characters a description refers to, move them, and see a record of what
+# was done.
+#
+# Every command that changes anything accepts --plan, which works out exactly
+# what would happen, prints it, and then does none of it. Read the plan, then
+# run the same command without --plan.
+#
+# Usage:
+#   scripts/neuron                       list the commands
+#   scripts/neuron places ratchet        find a named location
+#   scripts/neuron who 'bots hunters 20' see who that describes
+#   scripts/neuron teleport --roster 'bots hunters 20' --place ratchet --plan
+
+set -euo pipefail
+
+# {{{ set_dir
+DIR="/mnt/mtwo/games/azeroth-core/wow-chat-neuron"
+if [[ -n "${1:-}" && -d "${1:-}" && -f "${1:-}/src/020-cli.lua" ]]; then
+    DIR="$1"
+    shift
+fi
+# }}}
+
+# {{{ paths
+CLI_LUA="${DIR}/src/020-cli.lua"
+SHARED_MEMORY="${DIR}/tmp/shared-memory"
+# }}}
+
+# {{{ ensure_shared_memory
+# The shared-memory tier is RAM and is empty after every reboot, so anything
+# that writes a receipt has to be prepared to find it missing.
+mkdir -p "${SHARED_MEMORY}/receipts"
+# }}}
+
+# {{{ run
+exec luajit "${CLI_LUA}" "${DIR}" "$@"
+# }}}

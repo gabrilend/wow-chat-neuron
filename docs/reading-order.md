@@ -13,23 +13,25 @@ earlier in the count if that is where it belongs in the telling.
 | Index | File | What it adds to the story |
 |-------|------|---------------------------|
 | 000 | `src/000-deployment.lua` | Which world, and how to reach it. Everything below takes this handle as its first argument. |
+| 001 | `src/001-json.lua` | Encode and decode, for receipts and the API. |
 | 002 | `src/002-cold-hand.lua` | SQL over the deployment's own socket. The hand that works when the world is down. |
 | 003 | `src/003-live-hand.lua` | GM commands over the SOAP console. The hand that works when it is up. |
 | 004 | `src/004-liveness.lua` | Which hands are usable right now — and the guard against writing to a logged-in character. |
 | 005 | `src/005-world-read.lua` | Rows become records. Nothing above this writes a SELECT. |
-| 010 | `src/010-status-board.lua` | The observable half of phase 1: point at a world and say what you can see. |
+| 006 | `src/006-receipts.lua` | The append-only record of what was done, and what it overwrote. |
+| 010 | `src/010-status-board.lua` | Point at a world and say what you can see. |
+| 011 | `src/011-place-book.lua` | Places have names. Mostly the game's own, some ours. |
+| 012 | `src/012-rosters.lua` | Who to act on: a name, a list, or a description. |
+| 013 | `src/013-teleport.lua` | The first operation that changes the world. |
+| 014 | `src/014-return.lua` | Putting it back, from the receipt. |
+| 020 | `src/020-cli.lua` | The command line, so a person can pull the levers with no model involved. |
 
 ## Reserved and not yet written
 
 | Index | Planned | Phase |
 |-------|---------|-------|
-| 001 | `src/001-json.lua` — encode and decode, for receipts and the API | 1 |
-| 006 | `src/006-receipts.lua` — the append-only record of what was done | 1 |
-| 011+ | the place book, rosters, and displacement | 2 |
-
-001 is reserved rather than used because JSON belongs before the hands in the
-telling — receipts and the API both need it — and it has not been written yet.
-Leaving the hole is better than renumbering five files later.
+| 015+ | scatter and formation, so a roster does not arrive as a pile | 2 |
+| 021+ | item lists, strip, equip, loadouts | 3 |
 
 ## Tests
 

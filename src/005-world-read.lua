@@ -398,15 +398,28 @@ end
 -- Race and class print as words. A reader should never have to know that class 4
 -- is a Rogue; the project's standing position is that naming a thing in English
 -- beats naming it by its code.
+-- Three kinds of character need three labels, not two. A character that is
+-- merely "not a bot" may be a person OR an orphan whose account was deleted,
+-- and calling an orphan "you" is how nine hundred abandoned rows read as though
+-- somebody owns them.
+function WorldRead.kind_of(character)
+    if character.account_name == nil then
+        return "orphan"
+    elseif character.is_bot then
+        return "bot"
+    end
+    return "person"
+end
+
 function WorldRead.describe_character(character)
     local where = WorldRead.MAPS[character.map] or ("map " .. tostring(character.map))
-    return string.format("%-14s %-3d %-10s %-13s %-7s %-4s %s%s",
+    return string.format("%-14s %-3d %-10s %-13s %-7s %-7s %s%s",
         character.name,
         character.level,
         character.race_name  or ("race "  .. tostring(character.race)),
         character.class_name or ("class " .. tostring(character.class)),
         character.online and "online" or "offline",
-        character.is_bot and "bot" or "you",
+        WorldRead.kind_of(character),
         where,
         character.position_is_stale and "  (position is a stale snapshot)" or "")
 end

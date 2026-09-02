@@ -24,7 +24,7 @@ wow-chat-neuron/
 │   ├── balance-updates.md              Append-only log of knobs turned and levers pulled
 │   │
 │   ├── datapath-operation-dispatch.md  A request becoming a change — the spine
-│   ├── datapath-displacement.md        Moving characters through space
+│   ├── datapath-displacement.md        Moving characters through space [written]
 │   ├── datapath-outfitting.md          Changing what characters own and wear
 │   ├── datapath-company.md             Parties, bot generation, the garrison
 │   ├── datapath-renewal.md             Levelling coherently, and the style vector
