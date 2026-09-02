@@ -27,6 +27,8 @@ local PlaceBook  = dofile(neuron_root .. "/src/011-place-book.lua")
 local Rosters    = dofile(neuron_root .. "/src/012-rosters.lua")
 local Teleport   = dofile(neuron_root .. "/src/013-teleport.lua")
 local Return     = dofile(neuron_root .. "/src/014-return.lua")
+local Retire     = dofile(neuron_root .. "/src/015-retire.lua")
+local Dangling   = dofile(neuron_root .. "/src/016-dangling.lua")
 
 -- {{{ parse_flags(arguments)
 -- Turn `--key value` and `--flag` into a table.
@@ -215,6 +217,93 @@ local function command_return(handle, flags, positional)
 end
 -- }}}
 
+-- {{{ command_retire(handle, flags, positional)
+-- Remove characters and everything referring to them.
+--
+-- The only command here that cannot be undone, so it asks twice: --plan shows
+-- what would go, and applying requires --yes-remove-them spelled out. A single
+-- character flag is too easy to type by accident for something with no reverse.
+local function command_retire(handle, flags, positional)
+    local roster = flags.roster or positional[1]
+    if not roster then
+        fail("retire: needs a roster.\n"
+          .. "  neuron retire --roster orphans --plan\n"
+          .. "  neuron retire --roster orphans --yes-remove-them")
+    end
+
+    local state = Liveness.probe(handle)
+
+    local fault = Liveness.fault(state)
+    if fault then fail(fault) end
+
+    -- Refused outright while a worldserver is up. Removing rows out from under a
+    -- running game leaves it holding objects whose rows are gone, and the
+    -- failure mode is a crash at some later, unrelated moment.
+    if state.world_up then
+        fail("retire: the worldserver is running.\n"
+          .. "  Removing characters out from under a live server leaves it holding\n"
+          .. "  objects whose rows no longer exist, and it will fail later at some\n"
+          .. "  unrelated moment. Stop the worldserver first.")
+    end
+
+    local hand, hand_why = Liveness.choose_hand(state, Retire.declaration.hands)
+    if not hand then fail(hand_why) end
+
+    local plan, why = Retire.plan(handle, {
+        roster  = roster,
+        confirm = flags.confirm and true or nil,
+        include_orphans = true,
+    })
+    if not plan then fail(why) end
+
+    print(Retire.describe_plan(plan))
+    print("")
+
+    if flags.plan or not flags["yes-remove-them"] then
+        if flags.plan then
+            print("(--plan given; nothing was changed)")
+        else
+            print("(nothing was changed -- pass --yes-remove-them to actually do this)")
+        end
+        return
+    end
+
+    local receipt = Retire.apply(handle, plan, state)
+    print(Receipts.describe(receipt))
+
+    if receipt.backup then
+        print("")
+        print("backup: " .. receipt.backup)
+        print("        That path is in RAM and will NOT survive a reboot. Copy it")
+        print("        somewhere durable if you want to keep it.")
+    end
+
+    if receipt.outcome ~= "complete" then
+        os.exit(1)
+    end
+end
+-- }}}
+
+-- {{{ command_check(handle, flags, positional)
+-- Look for rows that name a character who does not exist.
+--
+-- The proof that a removal was complete, and the alarm that says a future one
+-- was not. Reads only.
+local function command_check(handle, flags, positional)
+    local result, why = Dangling.check(handle)
+    if not result then fail(why) end
+
+    print(Dangling.describe(result))
+
+    -- Residue is a finding, not a statistic. Per the standing position that a
+    -- warning is an error, a non-zero result exits non-zero so anything running
+    -- this in a build or a hook notices.
+    if result.total > 0 then
+        os.exit(1)
+    end
+end
+-- }}}
+
 -- {{{ command_receipts(handle, flags, positional)
 -- Show what was done.
 local function command_receipts(handle, flags, positional)
@@ -257,6 +346,12 @@ local COMMANDS = {
     ["return"] = { fn = command_return,
                  usage = "neuron return --receipt <id> [--plan]",
                  summary = "put characters back, from a receipt" },
+    check    = { fn = command_check,
+                 usage = "neuron check",
+                 summary = "find rows naming characters that no longer exist" },
+    retire   = { fn = command_retire,
+                 usage = "neuron retire --roster <roster> [--plan | --yes-remove-them]",
+                 summary = "remove characters completely -- CANNOT be undone" },
     receipts = { fn = command_receipts,
                  usage = "neuron receipts [--date YYYY-MM-DD] [--operation NAME]",
                  summary = "show what was done" },

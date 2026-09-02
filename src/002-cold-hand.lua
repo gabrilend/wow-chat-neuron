@@ -361,6 +361,86 @@ function ColdHand.write(handle, database, statement, values)
 end
 -- }}}
 
+-- {{{ ColdHand.script(handle, database, statements, label)
+-- Run many statements in ONE connection, as one transaction.
+--
+-- Everything else in this file is one statement per invocation, and therefore
+-- one connection per statement. That is fine for single writes and wrong for two
+-- situations this function exists to handle:
+--
+--   A TRANSACTION cannot span connections. The core wraps a character deletion
+--   in one so a character is never half removed; reproducing that needs every
+--   statement in the same session.
+--
+--   A TEMPORARY TABLE is scoped to its connection and invisible to every other
+--   one. Set-shaped work -- "delete these twenty-five thousand guids from
+--   thirty-nine tables" -- wants the guid list in a temporary table so each
+--   deletion can say WHERE guid IN (SELECT ...) instead of carrying the list.
+--   That collapses 975,000 statements into 39.
+--
+-- The script goes in through STDIN rather than -e, because a guid list is
+-- megabytes of text and a command line is not.
+--
+-- Failure semantics differ from the rest of this file and it matters: the script
+-- turns on the client's abort-on-error, so the FIRST failing statement stops the
+-- run before COMMIT is reached. An uncommitted transaction is rolled back when
+-- the connection closes, so a script that dies partway changes nothing at all.
+function ColdHand.script(handle, database, statements, label)
+    if not handle.mysql_password then
+        return nil, "no database password -- the deployment's secrets.conf has "
+                 .. "no DB_PASS, so there is nothing to authenticate with"
+    end
+
+    -- Written to the RAM tier rather than piped directly, so that a script which
+    -- misbehaves can be read afterwards. It is deleted on success; a leftover
+    -- file is itself a signal.
+    local script_path = "/dev/shm/wow-chat-neuron/" .. (label or "script") .. ".sql"
+
+    local file, why = io.open(script_path, "w")
+    if not file then
+        return nil, "cannot write the script to " .. script_path .. ": " .. tostring(why)
+    end
+    file:write(statements)
+    file:close()
+
+    local command = table.concat({
+        "MYSQL_PWD=" .. shell_quote(handle.mysql_password),
+        shell_quote(handle.mysql_binary),
+        "--no-defaults",
+        "--socket=" .. shell_quote(handle.mysql_socket),
+        "--user="   .. shell_quote(handle.mysql_user),
+        "--batch",
+        -- NO explicit stop-on-error flag is passed, and that is deliberate rather
+        -- than an omission. In batch mode the client already stops at the first
+        -- failing statement and exits non-zero; --force is what would make it
+        -- carry on. An earlier version passed --abort-source-on-error, which
+        -- this client (9.6.0) does not have, and the flag itself became the
+        -- error. Verified by feeding a script with a bad statement in the
+        -- middle: the statements after it do not run.
+        shell_quote(database),
+        "<", shell_quote(script_path),
+        "2>&1",
+    }, " ")
+
+    local pipe = io.popen(command, "r")
+    if not pipe then
+        return nil, "could not start " .. handle.mysql_binary
+    end
+    local output = pipe:read("*a")
+    local ok, _, code = pipe:close()
+
+    if not ok then
+        return nil, string.format(
+            "the script failed at statement exit %s and was NOT committed.\n"
+         .. "  The script is still at %s for inspection.\n  %s",
+            tostring(code), script_path, (output or ""):gsub("%s+$", ""))
+    end
+
+    os.remove(script_path)
+    return output
+end
+-- }}}
+
 -- {{{ ColdHand.probe(handle)
 -- Is the deployment's database reachable, and if not, why not?
 --

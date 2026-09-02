@@ -24,14 +24,16 @@ earlier in the count if that is where it belongs in the telling.
 | 012 | `src/012-rosters.lua` | Who to act on: a name, a list, or a description. |
 | 013 | `src/013-teleport.lua` | The first operation that changes the world. |
 | 014 | `src/014-return.lua` | Putting it back, from the receipt. |
+| 015 | `src/015-retire.lua` | Removing characters completely. The one thing with no reverse. |
+| 016 | `src/016-dangling.lua` | Proving a removal was complete, and catching one that was not. |
 | 020 | `src/020-cli.lua` | The command line, so a person can pull the levers with no model involved. |
 
 ## Reserved and not yet written
 
 | Index | Planned | Phase |
 |-------|---------|-------|
-| 015+ | scatter and formation, so a roster does not arrive as a pile | 2 |
-| 021+ | item lists, strip, equip, loadouts | 3 |
+| 017+ | scatter and formation, so a roster does not arrive as a pile | 2 |
+| 021+ | item lists, strip to holding, equip, loadouts | 3 |
 
 ## Tests
 
