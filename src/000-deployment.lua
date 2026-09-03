@@ -196,7 +196,13 @@ function Deployment.load()
         error("000-deployment: " .. config_path .. " does not name a deployment root")
     end
 
-    local profile   = read_profile(config.root)
+    -- An explicit profile in the config wins over the deployment's own, and the
+    -- fact that it did is carried on the handle so every description can say so.
+    -- A silent override would mean reading one world while believing you are
+    -- reading another, which is the same class of mistake as the two answers
+    -- disagreeing -- just arrived at from the other direction.
+    local deployment_profile = read_profile(config.root)
+    local profile   = config.profile or deployment_profile
     local databases = database_names(profile)
 
     -- Credentials come from two files with two different owners: the
@@ -210,6 +216,9 @@ function Deployment.load()
         neuron_root    = neuron_root,
         root           = config.root,
         profile        = profile,
+        deployment_profile = deployment_profile,
+        profile_overridden = (config.profile ~= nil)
+                             and (config.profile ~= deployment_profile),
 
         mysql_binary   = mysql_binary(config.root),
         mysql_socket   = config.root .. "/mysql/databases/mysql.sock",
@@ -265,7 +274,14 @@ end
 function Deployment.describe(handle)
     local lines = {}
     table.insert(lines, "deployment : " .. handle.root)
-    table.insert(lines, "profile    : " .. handle.profile)
+    if handle.profile_overridden then
+        table.insert(lines, "profile    : " .. handle.profile
+            .. "   (chosen in neuron's config; the deployment itself is set to '"
+            .. tostring(handle.deployment_profile) .. "')")
+    else
+        table.insert(lines, "profile    : " .. handle.profile
+            .. "   (read from the deployment)")
+    end
     table.insert(lines, "databases  : " .. handle.db_world)
     table.insert(lines, "             " .. handle.db_characters)
     table.insert(lines, "             " .. handle.db_playerbots)

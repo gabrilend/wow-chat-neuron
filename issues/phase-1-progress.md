@@ -112,3 +112,47 @@ ever be overridable.
 From issue 105: whether a character record should cache within a dispatch.
 
 None of these block phase 2.
+
+## Later: neuron got its own databases (issue 112)
+
+The question that settled it was asked directly — are the profiles separate
+database servers, or separate databases inside one server? They are the second:
+one process, eleven schemas, one set per profile, told apart by a name suffix.
+So giving neuron its own world is three `CREATE DATABASE` statements, not an
+installation.
+
+A separate MySQL instance on another disk was considered and declined. Real
+process isolation and a much roomier disk, against a second thing to start,
+stop, back up and keep in step — and the profile system already exists to solve
+exactly this.
+
+**The "read the profile, do not configure it" rule from issue 101 gained an
+exception, and the exception has a different shape than the rule.** Reading the
+deployment's own `.profile` is still the default, because two copies of that
+answer can disagree and the failure is silent writes to the wrong database. But
+naming a profile explicitly is not duplicating that answer — it says "I know
+what the deployment is running, and I mean a different one," which is exactly
+the situation once neuron owns databases alongside the four the deployment
+switches between.
+
+The safeguard is that the override announces itself. Every description of the
+deployment now says when a profile was chosen rather than read, and which one
+the deployment itself is set to. A silent override would mean reading one world
+while believing you are reading another: the same class of mistake the original
+rule prevents, reached from the other direction.
+
+**A finding about privileges, worth knowing before trusting the isolation.** The
+deployment's everyday database user has ALL PRIVILEGES on each existing game
+database, granted one at a time, and only USAGE globally — so it cannot create a
+database at all. Creation therefore runs once as the administrator, and the
+administrator account on this installation **has no password**: the database was
+initialised insecurely and the install script's own closing instruction to set
+one was never carried out. It is reachable only through a unix socket inside the
+deployment directory, never over the network, so the exposure is to local users
+of this machine. It should be fixed, and it belongs to the deployment to fix.
+
+Which also names the next improvement here: neuron's isolation is currently *by
+convention*, resting on every database name being derived from one profile
+string in one function. A database user granted rights on the `_neuron`
+databases only would make it structural — a mis-aimed operation refused by the
+server rather than merely unlikely.

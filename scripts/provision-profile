@@ -1,0 +1,180 @@
+#!/bin/bash
+# provision-profile
+#
+# Gives the neuron server its own set of databases inside the game server's
+# existing database installation, without touching the ones the other four
+# servers use.
+#
+# The profile system already works this way: each server profile owns a set of
+# databases inside one running database process, distinguished by a name suffix.
+# This adds another set with the suffix "neuron", so the existing vanilla, beta,
+# release and alpha data is never opened for writing at any point.
+#
+# What it creates:
+#   acore_world_neuron       a full copy of a chosen source world, with all its
+#                            creatures, items, quests and geography
+#   acore_characters_neuron  the structure only, with no characters in it
+#   acore_playerbots_neuron  the structure only, empty
+#
+# Accounts are deliberately NOT copied. The account database has no suffix and is
+# shared by every profile on this machine, which is how the game itself expects
+# several realms to work.
+#
+# Usage:
+#   scripts/provision-profile                 use the default source (vanilla)
+#   scripts/provision-profile --source beta   copy a different profile's world
+#   scripts/provision-profile --drop          remove the neuron databases again
+
+set -euo pipefail
+
+# {{{ set_dir
+DIR="/mnt/mtwo/games/azeroth-core/wow-chat-neuron"
+if [[ -n "${1:-}" && -d "${1:-}" && -f "${1:-}/src/020-cli.lua" ]]; then
+    DIR="$1"
+    shift
+fi
+# }}}
+
+# {{{ settings
+DEPLOYMENT="/mnt/mtwo/games/azeroth-core/wow-chat-2026"
+TARGET_SUFFIX="neuron"
+SOURCE_SUFFIX="vanilla"
+DROP_FIRST="no"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --source) SOURCE_SUFFIX="$2"; shift 2 ;;
+        --target) TARGET_SUFFIX="$2"; shift 2 ;;
+        --drop)   DROP_FIRST="yes";   shift   ;;
+        *) echo "unknown option: $1" >&2; exit 2 ;;
+    esac
+done
+
+MYSQL_BIN="${DEPLOYMENT}/mysql/installed-files/bin/mysql"
+DUMP_BIN="${DEPLOYMENT}/mysql/installed-files/bin/mysqldump"
+SOCKET="${DEPLOYMENT}/mysql/databases/mysql.sock"
+WORKING="${DIR}/tmp/shared-memory"
+# }}}
+
+# {{{ load_credentials
+# Two identities are needed, and the split is the point.
+#
+# The everyday user has ALL PRIVILEGES on each existing game database, granted
+# one at a time, and only USAGE globally -- so it cannot create a database. That
+# is a sensible arrangement and not something to work around permanently.
+#
+# So creating the databases is done as the administrator, once, and the everyday
+# user is then granted rights on the new ones. Everything afterwards -- every
+# read, every write, every operation this project performs -- runs as the
+# everyday user, exactly as it does against the existing profiles.
+#
+# The administrator account on this installation has NO PASSWORD, because the
+# database was initialised insecurely and the install script's own instruction
+# to set one was never carried out. It is reachable only through a unix socket
+# inside the deployment directory, never over the network, so the exposure is to
+# local users of this machine. Worth fixing; not this script's job to fix.
+source "${DEPLOYMENT}/secrets.conf"
+EVERYDAY_USER="${DB_USER:-root}"
+EVERYDAY_PASS="${DB_PASS}"
+ADMIN_USER="root"
+# }}}
+
+# {{{ helpers
+mkdir -p "${WORKING}"
+
+# As the everyday user, with its password.
+run_sql() {
+    MYSQL_PWD="${EVERYDAY_PASS}" "${MYSQL_BIN}" --no-defaults --socket="${SOCKET}" \
+        --user="${EVERYDAY_USER}" --batch -e "$1"
+}
+
+# As the administrator. Used ONLY to create databases and hand them over.
+run_admin_sql() {
+    "${MYSQL_BIN}" --no-defaults --socket="${SOCKET}" --user="${ADMIN_USER}" --batch -e "$1"
+}
+
+# Copy one database into another.
+#
+# Two filters are applied to every dump on the way through, and both were found
+# by trying to restore a backup rather than by trusting one existed:
+#
+#   The replication-position lines the dump tool writes by default need a
+#   privilege this database user does not have, so the restore would stop at its
+#   eighteenth line. Turned off at the source.
+#
+#   The owning-user clause on triggers needs another privilege, and there is one
+#   trigger in the character database. Stripped, so the trigger belongs to
+#   whoever restores it.
+copy_database() {
+    local source="$1" target="$2" structure_only="$3"
+    local data_flag=""
+    [[ "${structure_only}" == "yes" ]] && data_flag="--no-data"
+
+    echo "  ${source} -> ${target} ${structure_only:+(${structure_only/yes/structure only})}"
+
+    # Creating and handing over: administrator. Everything after: everyday user.
+    run_admin_sql "DROP DATABASE IF EXISTS \`${target}\`;"
+    run_admin_sql "CREATE DATABASE \`${target}\` DEFAULT CHARACTER SET utf8mb4;"
+    run_admin_sql "GRANT ALL PRIVILEGES ON \`${target}\`.* TO '${EVERYDAY_USER}'@'localhost';"
+    run_admin_sql "FLUSH PRIVILEGES;"
+
+    set -o pipefail
+    MYSQL_PWD="${EVERYDAY_PASS}" "${DUMP_BIN}" \
+        --no-defaults \
+        --socket="${SOCKET}" \
+        --user="${EVERYDAY_USER}" \
+        --skip-lock-tables \
+        --no-tablespaces \
+        --set-gtid-purged=OFF \
+        ${data_flag} \
+        "${source}" \
+      | sed -E 's|/\*!50017 DEFINER=[^*]*\*/||g' \
+      | MYSQL_PWD="${EVERYDAY_PASS}" "${MYSQL_BIN}" --no-defaults --socket="${SOCKET}" \
+            --user="${EVERYDAY_USER}" "${target}"
+}
+# }}}
+
+# {{{ guard_source_is_not_target
+# The whole point is not to write to the other profiles' data. Refuse rather
+# than trust the caller got the flags right.
+if [[ "${SOURCE_SUFFIX}" == "${TARGET_SUFFIX}" ]]; then
+    echo "ERROR: source and target are both '${SOURCE_SUFFIX}'." >&2
+    echo "       That would overwrite the profile being copied from." >&2
+    exit 1
+fi
+# }}}
+
+# {{{ drop
+if [[ "${DROP_FIRST}" == "yes" ]]; then
+    echo "Removing the ${TARGET_SUFFIX} databases..."
+    for kind in world characters playerbots; do
+        run_admin_sql "DROP DATABASE IF EXISTS \`acore_${kind}_${TARGET_SUFFIX}\`;"
+        echo "  dropped acore_${kind}_${TARGET_SUFFIX}"
+    done
+    echo "Done."
+    exit 0
+fi
+# }}}
+
+# {{{ provision
+echo "Building the ${TARGET_SUFFIX} databases from ${SOURCE_SUFFIX}..."
+echo ""
+
+copy_database "acore_world_${SOURCE_SUFFIX}"      "acore_world_${TARGET_SUFFIX}"      "no"
+copy_database "acore_characters_${SOURCE_SUFFIX}" "acore_characters_${TARGET_SUFFIX}" "yes"
+copy_database "acore_playerbots_${SOURCE_SUFFIX}" "acore_playerbots_${TARGET_SUFFIX}" "yes"
+
+echo ""
+echo "Done. What exists now:"
+run_sql "
+SELECT table_schema AS 'database',
+       COUNT(*)     AS tables,
+       ROUND(SUM(data_length+index_length)/1024/1024,1) AS 'size MB'
+FROM information_schema.tables
+WHERE table_schema LIKE '%\_${TARGET_SUFFIX}'
+GROUP BY table_schema;"
+
+echo ""
+echo "Characters in the new profile:"
+run_sql "SELECT COUNT(*) AS characters FROM acore_characters_${TARGET_SUFFIX}.characters;"
+# }}}

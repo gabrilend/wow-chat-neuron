@@ -408,12 +408,44 @@ function Retire.backup(handle)
         -- recreating storage layout, and reading tablespace metadata needs a
         -- privilege too.
         "--no-tablespaces",
+        -- Without this, mysqldump writes `SET @@SESSION.SQL_LOG_BIN = 0` into
+        -- the dump header, because binary logging is on. Setting that session
+        -- variable needs SUPER or SYSTEM_VARIABLES_ADMIN, which the deployment's
+        -- database user does not hold -- so the dump would refuse to load at its
+        -- eighteenth line, for the SAME user that just wrote it.
+        --
+        -- A backup that cannot be restored by the credentials that made it is
+        -- not a backup, and the failure appears only at restore time: exactly
+        -- when somebody has already lost something and is relying on it. Found
+        -- by actually restoring one rather than by trusting that the file
+        -- existed and was the right size.
+        "--set-gtid-purged=OFF",
         quote(handle.db_characters),
-        ">", quote(path),
+        -- Strip DEFINER clauses on the way out.
+        --
+        -- mysqldump writes the owning user into every trigger and view it
+        -- dumps, and recreating one owned by a different user needs
+        -- SET_ANY_DEFINER. This database has one trigger, owned by a user that
+        -- is not the one the restore connects as, so the dump would refuse to
+        -- load partway through -- after having already replaced some tables.
+        -- Removing the clause makes the trigger belong to whoever restores it,
+        -- which is the right answer and the only one available: mysqldump has
+        -- no flag for this.
+        -- mysqldump's stderr is captured HERE, before the pipe. A redirect at
+        -- the end of a pipeline binds to the LAST command, so writing it there
+        -- would collect sed's complaints and silently discard mysqldump's --
+        -- which is how a failed backup reports "it failed" and nothing else.
         "2>", quote(errors),
+        "|", "sed", "-E", quote([==[s|/\*!50017 DEFINER=[^*]*\*/||g]==]),
+        ">", quote(path),
     }, " ")
 
-    local ok = os.execute(command)
+    -- Run under bash with pipefail, so a mysqldump failure still fails the
+    -- backup. Without it the exit status is sed's, sed succeeds on an empty
+    -- stream, and a dump that never happened reports success -- which is the
+    -- worst possible outcome for the one step standing between an irreversible
+    -- deletion and losing everything.
+    local ok = os.execute("bash -o pipefail -c " .. quote(command))
     if ok ~= true and ok ~= 0 then
         -- Read back what the tool actually said. An earlier version discarded
         -- stderr and reported only "mysqldump failed", which is a message that

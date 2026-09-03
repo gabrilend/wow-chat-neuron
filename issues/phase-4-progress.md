@@ -94,6 +94,51 @@ thing that can prove a removal was complete, and it is the alarm for the next on
 that is not. It exits non-zero when it finds anything, on the standing position
 that a warning is an error.
 
+## The backup could not be restored, and only restoring it found that out
+
+The removal takes a dump first and refuses to proceed without one. That dump was
+verified the way backups usually are — the file exists, it is the right size, it
+is valid gzip — and all three of those were true of a backup that could not be
+loaded.
+
+Restoring it revealed two separate privilege walls, one after the other:
+
+The dump tool writes replication-position statements into its header by default,
+because binary logging is on. Setting those needs a privilege the deployment's
+database user does not hold, so the restore stopped at line 18 — **for the same
+user that had just written the file.** A backup that cannot be restored by the
+credentials that made it is not a backup, and the failure surfaces only at
+restore time: precisely when somebody has already lost something and is relying
+on it.
+
+Past that, the restore ran for twenty-three seconds and then stopped again, on a
+trigger carrying the name of the user who created it. Recreating a trigger owned
+by somebody else needs another privilege. The dump tool has no flag for this, so
+the clause is now stripped as the dump is written, which makes the trigger belong
+to whoever restores it — the right answer, and the only available one.
+
+That second failure is the worse of the two, because it happens *partway*. The
+restore had already replaced some tables when it stopped. A backup that fails
+immediately is an inconvenience; one that fails halfway leaves the database in a
+state that is neither where it was nor where it was going.
+
+Both are fixed at the point of writing rather than the point of reading, so no
+future dump needs a special restore procedure. Verified by taking a fresh dump
+and finding zero privileged statements in it.
+
+**And a third problem the fix introduced.** Stripping the trigger clause means
+piping the dump through a filter, and a pipeline reports the exit status of its
+*last* command. The filter succeeds happily on an empty stream, so a dump that
+never happened would have reported success — the worst possible outcome for the
+one step standing between an irreversible deletion and losing everything. The
+pipeline now runs with `pipefail`, and a negative test confirms it: pointed at a
+nonexistent socket, the backup refuses and says why.
+
+The error message needed the same care. A trailing stderr redirect in a pipeline
+binds to the last command, so the first version captured the filter's complaints
+and discarded the dump tool's. It reported "mysqldump failed" and nothing else,
+which tells the reader only what they already knew.
+
 ## Backups
 
 Two dumps were taken, one before each removal, into `/dev/shm/wow-chat-neuron/`.

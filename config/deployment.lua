@@ -36,6 +36,23 @@ return {
     -- The password for it lives in secrets.conf under NEURON_SOAP_PASSWORD.
     soap_account = "neuron",
 
+    -- Which profile to act on.
+    --
+    -- Leave this nil and neuron reads the deployment's own `.profile` file,
+    -- which is the right default: the deployment is the authority on what it is
+    -- running, and a second copy of that answer is a second thing to keep in
+    -- step.
+    --
+    -- Setting it is NOT the same as duplicating that answer. It says "I know
+    -- what the deployment is running, and I mean a different one" -- which is
+    -- exactly the situation here, because neuron owns its own set of databases
+    -- alongside the four the deployment switches between, and acts on them
+    -- whichever profile the deployment happens to have selected.
+    --
+    -- Because an override is easy to forget, it is REPORTED everywhere the
+    -- deployment is described, rather than being quietly in effect.
+    profile = "neuron",
+
     -- How long to wait on each service before calling it down, in seconds.
     -- Short, because these probes run before real work and a hung probe is
     -- indistinguishable to the user from a hung tool.

@@ -125,3 +125,35 @@ is "then the server project builds one", not "neuron grows a build system".
   the profile this subtracts from, and its own account of why it drifted
 - `docs/architecture.md` — open question 1, the control-plane boundary
 - `LICENSE.md` — why a widely-known ruleset is the valuable thing
+
+## Which World Database To Start From
+
+Measured on the live installation. The three world databases are not variations
+on one thing — they are two different worlds:
+
+| Database | Creature spawns | 148 kit rows | What it is |
+|----------|-----------------|--------------|------------|
+| `acore_world_vanilla` | **149,923** | 581 | A full WotLK world, plus the vanilla ruleset |
+| `acore_world` | 7,839 | 0 | The wow-chat design — the world deliberately emptied |
+| `acore_world_beta` | 8,052 | 0 | The same, for the beta profile |
+| `acore_world_release` | 149,876 | 0 | A full world, no vanilla ruleset |
+
+The emptied ones are not candidates. Everland Ghostsong removes the world's
+creatures on purpose — "the world is empty until you arrive" — and a plain WotLK
+server is the opposite of that.
+
+Which leaves two, and the comparison is instructive: **`acore_world_release` is
+already very close to the target.** A full world at 149,876 spawns with none of
+the vanilla ruleset in it. `acore_world_vanilla` has 47 more spawns and 581 rows
+of starter-kit data that the plain profile does not want.
+
+So the subtraction described above may be the wrong route. Starting from
+`release`'s world data and applying none of the vanilla config patches is likely
+to be both less work and more honest than starting from `vanilla` and undoing
+seven SQL files. The 47-spawn difference should be identified before choosing —
+it is small enough to be an artefact and large enough to be a deliberate change
+somebody made.
+
+`acore_world_neuron` was provisioned from `acore_world_vanilla` (issue 112),
+which means it currently carries the 581 kit rows. Rebasing it on `release`'s
+world is a single re-run of the provisioning script with a different source.
