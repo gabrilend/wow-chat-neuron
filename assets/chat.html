@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>neuron</title>
+<style>
+/* ---------------------------------------------------------------------------
+   The window is a chat frame, not a form.
+   A control panel invites you to fill in fields; a chat frame invites you to
+   say something, and saying something is the entire interface this is aiming
+   at. Everything below serves that.
+
+   Nothing is fetched. No fonts, no icons, no scripts from anywhere. The game
+   server this drives runs on a machine that may have no internet, and so must
+   the window that drives it.
+   --------------------------------------------------------------------------- */
+
+:root {
+  --ink:        #d8d2c4;
+  --dim:        #8a8375;
+  --gold:       #ffd100;
+  --gold-deep:  #a67c00;
+  --gold-edge:  #6b4f00;
+  --frame:      #0a0a0c;
+  --frame-soft: #14141a;
+
+  /* The chat colours the game itself uses. Kept because they are already
+     known: yellow means the system is talking, red means it went wrong. */
+  --say:     #ffffff;
+  --system:  #ffff00;
+  --error:   #ff2020;
+  --whisper: #ff80ff;
+  --guild:   #40ff40;
+  --party:   #aaaaff;
+
+  /* Item quality, borrowed for meaning rather than decoration: a plan that
+     will change the world is marked the way something rare is marked. */
+  /* The class colours, exactly as the game uses them. Every player already
+     reads these without thinking, which makes them the cheapest meaning
+     available: a list of names becomes a list of roles at a glance. */
+  --warrior: #c79c6e;  --paladin: #f58cba;  --hunter:  #abd473;
+  --rogue:   #fff569;  --priest:  #ffffff;  --dk:      #c41f3b;
+  --shaman:  #0070de;  --mage:    #69ccf0;  --warlock: #9482c9;
+  --druid:   #ff7d0a;
+
+  --poor:      #9d9d9d;
+  --uncommon:  #1eff00;
+  --rare:      #0070dd;
+  --epic:      #a335ee;
+  --legendary: #ff8000;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background:
+    radial-gradient(ellipse at 50% 0%, #1a1712 0%, #0b0a08 45%, #050505 100%);
+  color: var(--ink);
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+}
+
+/* --- the frame ---------------------------------------------------------- */
+
+.frame {
+  width: min(980px, 100%);
+  height: min(760px, calc(100vh - 36px));
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, rgba(10,10,12,.96), rgba(6,6,8,.98));
+  border: 2px solid #3a2a08;
+  border-radius: 5px;
+  /* The layered shadow is the ornate metal edge, faked: a bright inner hairline,
+     a dark bevel under it, and a wide soft glow to lift it off the ground. */
+  /* The ornate metal edge, faked in layers: a bright hairline catching the
+     light, a warm band below it, a dark bevel, then a wide glow lifting the
+     whole frame off the ground. */
+  box-shadow:
+    inset 0 0 0 1px rgba(255,209,0,.45),
+    inset 0 0 0 2px rgba(120,86,0,.55),
+    inset 0 2px 0 rgba(255,231,120,.28),
+    inset 0 -2px 0 rgba(0,0,0,.75),
+    inset 0 0 70px rgba(255,180,0,.045),
+    0 0 0 1px #000,
+    0 0 22px rgba(255,180,0,.13),
+    0 18px 70px rgba(0,0,0,.8);
+  overflow: hidden;
+}
+
+/* --- title -------------------------------------------------------------- */
+
+.title {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 16px 9px;
+  background: linear-gradient(180deg, #1c1710, #0d0b08);
+  border-bottom: 1px solid var(--gold-edge);
+  box-shadow: inset 0 1px 0 rgba(255,209,0,.18);
+}
+
+.title h1 {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  color: var(--gold);
+  text-shadow: 0 0 10px rgba(255,209,0,.35), 0 1px 0 #000;
+}
+
+.title .where {
+  font-size: 11.5px;
+  color: var(--dim);
+  letter-spacing: .02em;
+}
+
+.title .where b { color: var(--uncommon); font-weight: 600; }
+
+/* --- tabs --------------------------------------------------------------- */
+/* One tab today. It is here because issue 905 wants several, and a tab strip
+   added later would move everything below it. */
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  padding: 0 12px;
+  background: #08080a;
+  border-bottom: 1px solid #241a06;
+}
+
+.tab {
+  padding: 6px 14px 5px;
+  font-size: 12px;
+  color: var(--dim);
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 3px 3px 0 0;
+  cursor: default;
+}
+
+.tab.on {
+  color: var(--gold);
+  background: linear-gradient(180deg, #191309, #0f0c07);
+  border-color: var(--gold-edge);
+  box-shadow: inset 0 1px 0 rgba(255,209,0,.16);
+}
+
+/* --- scrollback --------------------------------------------------------- */
+
+.log {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 16px 6px;
+  line-height: 1.5;
+  scrollbar-width: thin;
+  scrollbar-color: var(--gold-deep) #0a0a0c;
+}
+
+.log::-webkit-scrollbar { width: 10px; }
+.log::-webkit-scrollbar-track { background: #0a0a0c; }
+.log::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, var(--gold-deep), #4a3600);
+  border-radius: 5px;
+  border: 1px solid #000;
+}
+
+.line { margin: 0 0 7px; white-space: pre-wrap; word-break: break-word; }
+.line .who { color: var(--dim); }
+
+.line.you     { color: var(--say); }
+.line.you .who { color: var(--party); }
+.line.system  { color: var(--system); }
+.line.trouble { color: var(--error); }
+.line.done    { color: var(--uncommon); }
+
+.mono {
+  font-family: "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace;
+  font-size: 12.5px;
+}
+
+table.roster {
+  border-collapse: collapse;
+  margin: 2px 0 10px;
+  font-size: 12.5px;
+  font-family: "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace;
+}
+
+table.roster td {
+  padding: 1px 14px 1px 0;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+table.roster td.nm { font-weight: 600; padding-left: 4px; }
+table.roster tr:hover td { background: rgba(255,209,0,.05); }
+
+/* --- a plan ------------------------------------------------------------- */
+/* Marked the way the game marks something rare, because it is the one thing
+   in this window that will change the world if you say yes. */
+
+.plan {
+  margin: 4px 0 10px;
+  border: 1px solid var(--epic);
+  border-radius: 3px;
+  background: linear-gradient(180deg, rgba(163,53,238,.08), rgba(0,0,0,.35));
+  box-shadow: inset 0 0 24px rgba(163,53,238,.10);
+  overflow: hidden;
+}
+
+.plan .head {
+  padding: 7px 12px;
+  font-size: 11.5px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--epic);
+  background: rgba(163,53,238,.10);
+  border-bottom: 1px solid rgba(163,53,238,.35);
+}
+
+.plan .body {
+  padding: 10px 12px;
+  color: var(--ink);
+  white-space: pre-wrap;
+}
+
+.plan .choices {
+  display: flex;
+  gap: 8px;
+  padding: 0 12px 12px;
+}
+
+button {
+  font: inherit;
+  font-size: 12.5px;
+  padding: 6px 16px;
+  color: var(--ink);
+  background: linear-gradient(180deg, #241d10, #12100a);
+  border: 1px solid var(--gold-edge);
+  border-radius: 3px;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255,209,0,.14);
+}
+
+button:hover:not(:disabled) {
+  color: var(--gold);
+  border-color: var(--gold-deep);
+  box-shadow: inset 0 1px 0 rgba(255,209,0,.3), 0 0 12px rgba(255,209,0,.18);
+}
+
+button.go { color: var(--uncommon); border-color: #2c6a12; }
+button.go:hover:not(:disabled) { color: #7cff5a; border-color: var(--uncommon); }
+
+button:disabled { opacity: .4; cursor: default; }
+
+/* --- input -------------------------------------------------------------- */
+
+.say {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: linear-gradient(180deg, #0e0c09, #070606);
+  border-top: 1px solid var(--gold-edge);
+  box-shadow: inset 0 1px 0 rgba(255,209,0,.12);
+}
+
+.say .prompt {
+  color: var(--gold);
+  font-family: Georgia, serif;
+  font-size: 15px;
+  text-shadow: 0 0 8px rgba(255,209,0,.4);
+}
+
+.say input {
+  flex: 1;
+  font: inherit;
+  color: var(--say);
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: 4px 0;
+}
+
+.say input::placeholder { color: #5d564a; }
+
+.hint {
+  padding: 0 16px 10px;
+  font-size: 11px;
+  color: #5d564a;
+  background: #070606;
+}
+
+.hint code {
+  color: var(--dim);
+  font-family: "Cascadia Mono", Consolas, monospace;
+}
+</style>
+</head>
+<body>
+
+<div class="frame">
+
+  <div class="title">
+    <h1>neuron</h1>
+    <div class="where" id="where">connecting&hellip;</div>
+  </div>
+
+  <div class="tabs">
+    <div class="tab on">General</div>
+  </div>
+
+  <div class="log" id="log"></div>
+
+  <div class="say">
+    <span class="prompt">&rsaquo;</span>
+    <input id="input" autocomplete="off" autofocus
+           placeholder="say what you want &mdash; try: who are the hunters">
+  </div>
+
+  <div class="hint">
+    <code>who are the hunters</code> &nbsp;
+    <code>where is ratchet</code> &nbsp;
+    <code>move the hunters to ratchet</code> &nbsp;
+    <code>receipts</code> &nbsp;
+    <code>help</code>
+  </div>
+
+</div>
+
+<script>
+const log   = document.getElementById('log');
+const input = document.getElementById('input');
+const where = document.getElementById('where');
+
+/* Scrollback is kept in the page and restored on reload, so a refresh does not
+   throw away what was said. Wrapped because a browser with site data blocked
+   throws on access rather than returning nothing. */
+function remember(html) {
+  try { sessionStorage.setItem('neuron-log', html); } catch (e) {}
+}
+function recall() {
+  try { return sessionStorage.getItem('neuron-log'); } catch (e) { return null; }
+}
+
+function line(kind, who, text, mono) {
+  const p = document.createElement('p');
+  p.className = 'line ' + kind + (mono ? ' mono' : '');
+  if (who) {
+    const w = document.createElement('span');
+    w.className = 'who';
+    w.textContent = '[' + who + '] ';
+    p.appendChild(w);
+  }
+  p.appendChild(document.createTextNode(text));
+  log.appendChild(p);
+  log.scrollTop = log.scrollHeight;
+  remember(log.innerHTML);
+  return p;
+}
+
+/* A plan is the one thing here that changes the world, so it is the one thing
+   that gets a confirmation. The plan is held on the server; confirming runs
+   exactly what was shown rather than computing it again. */
+function showPlan(text, planId) {
+  const box = document.createElement('div');
+  box.className = 'plan';
+
+  const head = document.createElement('div');
+  head.className = 'head';
+  head.textContent = 'this will change the world';
+
+  const body = document.createElement('div');
+  body.className = 'body mono';
+  body.textContent = text;
+
+  const choices = document.createElement('div');
+  choices.className = 'choices';
+
+  const go = document.createElement('button');
+  go.className = 'go';
+  go.textContent = 'Do it';
+
+  const no = document.createElement('button');
+  no.textContent = 'Leave it';
+
+  choices.appendChild(go);
+  choices.appendChild(no);
+  box.appendChild(head);
+  box.appendChild(body);
+  box.appendChild(choices);
+  log.appendChild(box);
+  log.scrollTop = log.scrollHeight;
+
+  no.onclick = () => {
+    choices.remove();
+    head.textContent = 'left alone';
+    head.style.color = 'var(--poor)';
+    box.style.borderColor = 'var(--poor)';
+    box.style.background = 'none';
+    box.style.boxShadow = 'none';
+    remember(log.innerHTML);
+  };
+
+  go.onclick = async () => {
+    go.disabled = true; no.disabled = true;
+    go.textContent = 'working…';
+    const r = await post('/apply', { plan_id: planId });
+    choices.remove();
+    head.textContent = r.outcome === 'complete' ? 'done' : 'did not finish';
+    head.style.color = r.outcome === 'complete' ? 'var(--uncommon)' : 'var(--error)';
+    box.style.borderColor = head.style.color;
+    line(r.kind === 'done' ? 'done' : 'trouble', 'neuron', r.text, true);
+  };
+
+  remember(log.innerHTML);
+}
+
+const CLASS_COLOUR = {
+  'Warrior':'var(--warrior)', 'Paladin':'var(--paladin)', 'Hunter':'var(--hunter)',
+  'Rogue':'var(--rogue)',     'Priest':'var(--priest)',   'Death Knight':'var(--dk)',
+  'Shaman':'var(--shaman)',   'Mage':'var(--mage)',       'Warlock':'var(--warlock)',
+  'Druid':'var(--druid)'
+};
+
+/* A roster is shown as a table with each name in its class colour, because that
+   is the one piece of formatting a WoW player already reads without effort. */
+function showRoster(people) {
+  const table = document.createElement('table');
+  table.className = 'roster';
+  people.forEach(p => {
+    const row = table.insertRow();
+    const name = row.insertCell();
+    name.textContent = p.name;
+    name.style.color = CLASS_COLOUR[p.class] || 'var(--say)';
+    name.className = 'nm';
+    row.insertCell().textContent = p.level;
+    row.insertCell().textContent = p.race;
+    const cls = row.insertCell();
+    cls.textContent = p.class;
+    cls.style.color = CLASS_COLOUR[p.class] || 'var(--dim)';
+    const kind = row.insertCell();
+    kind.textContent = p.kind;
+    kind.style.color = p.kind === 'person' ? 'var(--uncommon)'
+                     : p.kind === 'orphan' ? 'var(--poor)' : 'var(--dim)';
+    row.insertCell().textContent = p.online ? 'online' : '';
+    row.insertCell().textContent = p.where;
+  });
+  log.appendChild(table);
+  log.scrollTop = log.scrollHeight;
+  remember(log.innerHTML);
+}
+
+async function post(path, payload) {
+  try {
+    const response = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    return await response.json();
+  } catch (e) {
+    return { kind: 'trouble', text: 'the server did not answer: ' + e.message };
+  }
+}
+
+async function ask(text) {
+  line('you', 'you', text);
+  const r = await post('/ask', { text: text });
+
+  if (r.kind === 'plan') {
+    showPlan(r.text, r.plan_id);
+    return;
+  }
+
+  const p = line(r.kind === 'trouble' ? 'trouble' : (r.kind === 'done' ? 'done' : 'system'),
+                 'neuron', r.text, true);
+
+  if (r.people && r.people.length) showRoster(r.people);
+
+  if (r.examples) {
+    r.examples.forEach(e => line('system', null, '  ' + e, true));
+  }
+}
+
+input.addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  ask(text);
+});
+
+/* Opening: say where we are pointed, so the first thing on screen is which
+   world is about to be changed. */
+(async () => {
+  const saved = recall();
+  if (saved) { log.innerHTML = saved; log.scrollTop = log.scrollHeight; }
+
+  const r = await post('/ask', { text: 'status' });
+  const profile = (r.text.match(/profile\s*:\s*(\S+)/) || [])[1];
+  where.innerHTML = profile
+    ? 'pointed at <b>' + profile + '</b>'
+    : 'not connected';
+
+  if (!saved) {
+    line('system', 'neuron', r.text, true);
+    line('system', null, 'Say something. "help" lists what I understand.');
+  }
+
+  /* ?ask=... runs a question on load, so a useful one can be bookmarked or
+     linked. It goes through exactly the same path as typing it, so a linked
+     question that would change something still stops at its plan. */
+  const asked = new URLSearchParams(location.search).get('ask');
+  if (asked) ask(asked);
+})();
+</script>
+
+</body>
+</html>

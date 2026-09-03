@@ -1,6 +1,6 @@
 # Conversation Summary: 3b5eb578-ca6e-4376-b7ee-695c7cede9f0
 
-Generated on: 2026-09-02 17:32:23
+Generated on: 2026-09-02 18:32:19
 
 --------------------------------------------------------------------------------
 
@@ -1621,6 +1621,288 @@ I'll add it to the config.
 I didn't change any of this and I'm not recommending you rush — I flagged it
 because I'd used the account and thought you should know it was open. Poor
 phrasing on my part made it sound like something much worse.
+
+
+--------------------------------------------------------------------------------
+
+### User Request 7
+
+okay so where are we at
+
+
+--------------------------------------------------------------------------------
+
+### Assistant Response 7
+
+Tree clean, 6 commits on `neuron`.
+
+
+## Working, verified against your live data
+
+
+| Command | Does |
+
+|---|---|
+
+| `scripts/status` | What's running, which profile, who exists |
+
+| `neuron places <name>` | Find any of 1,989 named locations |
+
+| `neuron who <roster>` | Resolve "bots hunters 18-20" → characters |
+
+| `neuron teleport` | Move a roster to a place, `--plan` first |
+
+| `neuron return --receipt <id>` | Put them back exactly |
+
+| `neuron retire` | Remove characters completely — no undo |
+
+| `neuron check` | Find rows naming characters that don't exist |
+
+| `scripts/provision-profile` | Give neuron its own databases |
+
+
+15 modules, 13 `.info.md`, 21 issues, 2 test files (58 assertions, passing).
+
+
+## State of your machine
+
+
+- **Vanilla restored** — 24,110 bots + your 5, orphans cleared, zero dangling
+  rows
+
+- **neuron has its own databases** — full 422 MB world, 0 characters
+
+- **All services stopped**
+
+- **Backups in `/dev/shm/wow-chat-neuron/`** — 3 files, ~25 MB, **will not
+  survive a reboot**
+
+
+## Phases
+
+
+**Done:** 1 (Reach), 2 (Displacement), plus 404 and 112 pulled forward.
+
+**Blueprinted, unbuilt:** 3 (Outfitting — your strip-to-holding design), 4
+(party/bots/garrison), 5–11.
+
+
+## Two things blocking
+
+
+**The live hand has never run.** Every operation so far was a database write.
+Teleporting a *logged-in* character by GM command is written and unproven —
+needs a GM account and a running worldserver. You deferred this; it's still the
+only untested half.
+
+
+**Issue 111 probably has the wrong plan.** I found `acore_world_release` is
+already a full world with none of the vanilla ruleset — likely a better base
+for plain WotLK than subtracting seven SQL files from vanilla. One
+`provision-profile --source release` rebases it. There's a 47-spawn difference
+to identify first.
+
+
+Next natural step is phase 3 (strip/equip), which needs no server. Or the live
+hand, which does.
+
+
+--------------------------------------------------------------------------------
+
+### User Request 8
+
+okay, so, in your words, can you describe what this system is supposed to do?
+
+
+--------------------------------------------------------------------------------
+
+### Assistant Response 8
+
+A world is already running — characters, places, objects, rules. Changing
+anything in it normally means learning a command language, or writing SQL, or
+knowing which of several methods will actually stick. neuron is the thing you
+talk to *about* that world. You say what you want in ordinary words; something
+in the world changes.
+
+
+**The constraint that shapes everything:** the model never writes code, never
+writes SQL, never runs a command. It picks from a closed set of named operations
+with typed parameters. Read as security that's a decent argument. Read as design
+it's a better one — a closed vocabulary with a grammar is a *language*, and
+building a small language inside a system you don't own is the actual craft. The
+safety falls out of the design for free.
+
+
+**Three ways to reach the world.** Writing to the database directly works when
+the server is off and reaches things no command can express, but nothing's
+visible until something reads the row. Game-master commands work only while the
+server runs and are instantly visible to everyone standing there, but most of
+that vocabulary acts on whatever the operator has *selected*, and a script has
+no selection — which is the whole reason the first route exists. And scripts
+running inside the server itself, for rules that keep applying rather than edits
+that happen once.
+
+
+**The fact that forces the design:** a running server holds logged-in characters
+in memory and flushes them on a timer. Writing such a character's row succeeds,
+reports success, and is silently overwritten minutes later. Nothing errors. So
+which route to use isn't chosen per operation — it's chosen *per character*,
+checked at the moment of writing, because the gap between planning and approving
+is time enough for someone to log in.
+
+
+**Every operation splits in two.** One half computes and touches nothing,
+returning a list of sentences describing what would happen. The other half
+executes and records what it overwrote. That buys three things: a dry run that
+can't drift from reality because it *is* reality stopped one step early; a
+machine's intentions readable before they're real; and enough recorded to put
+forty people back where they were standing.
+
+
+**Then it stacks.** Those levers become a vocabulary a machine can speak,
+generated from the same declarations that make the command line. A sentence goes
+in, tool calls come out. You type it in a browser window with tabs, or by
+talking to a character in the game. Game-master characters narrate what's
+happening as it happens. And finally a session becomes a portable text file —
+props, cast, story — that can be applied to another world, twice safely,
+turning whoever's already standing in the right place into the cast.
+
+
+**The test:** phases one through six are usable by a person at a terminal with
+no model anywhere. If the asking half never gets built, the project is still
+useful. That's how you know the levers were designed properly rather than as
+scaffolding for the interesting part.
+
+
+--------------------------------------------------------------------------------
+
+### User Request 9
+
+okay, so, it's an LLM that you can talk to which will create datafiles that
+represent the changes you're asking for, and then they are applied by the game
+to it's live state and you can do so while playing without interruption? Why
+didn't you just say that?
+
+
+--------------------------------------------------------------------------------
+
+### Assistant Response 9
+
+Yes, that's the pitch and I should have led with it.
+
+
+Two corrections, both load-bearing:
+
+
+**"Applied by the game"** — only sometimes. Roughly half of what this does
+works *because the game isn't looking*: writing directly to the database, for
+characters who are logged out or while the server is stopped. That's not a
+footnote, it's the central problem. A running game holds logged-in characters in
+memory and will silently overwrite a database change to one of them. So the
+system has to know, per character, at the moment of writing, whether the game is
+currently the authority on that person. Most of the engineering so far is that
+one distinction.
+
+
+**"Without interruption"** — true for a character who's logged in and being
+moved by a game-master command. Not true for an offline character, and not true
+for anything bulk. Clearing 25,000 characters required the server *off*, and the
+tool refuses to run otherwise.
+
+
+So the accurate version is a sentence longer: *an LLM you talk to that describes
+the change before making it, then applies it through whichever channel is
+actually authoritative right now — which is sometimes the live game and
+sometimes the database behind its back.*
+
+
+And you're right that I buried it. I described the mechanism before the point.
+
+
+--------------------------------------------------------------------------------
+
+### User Request 10
+
+Okay so where are we at with that use-case
+
+
+--------------------------------------------------------------------------------
+
+### Assistant Response 10
+
+**Back half built and proven. Front half not started.**
+
+
+The use case is a pipeline. Where each stage stands:
+
+
+| Stage | Status |
+
+|---|---|
+
+| You type a sentence somewhere | **Not built** — no door exists |
+
+| A model turns it into operations | **Not built** — no API loop |
+
+| Operations are describable to a model | **Not built** — 3 declarations exist, nothing renders them as a tool schema |
+
+| The change is described before it's made | **Built** — `--plan` on everything |
+
+| The change is applied | **Built** for the database channel, proven on 25,010 characters |
+
+| ...through the live game, while playing | **Written, never run** |
+
+| It can be undone | **Built** — verified to the hundredth of a yard |
+
+
+Today you can type this:
+
+
+```
+
+neuron teleport --roster 'bots hunters 20' --place ratchet --plan
+
+```
+
+
+You cannot type this:
+
+
+```
+
+"put the hunters on the Ratchet dock"
+
+```
+
+
+**The gap is three phases plus one proof**, and it's smaller than it sounds:
+
+
+- **Phase 7** — turn the operation declarations into JSON Schema. The
+  declarations already exist and already carry typed parameters; this is mostly
+  mechanical.
+
+- **Phase 8** — an HTTPS loop: send the schema, get tool calls back, run the
+  plan, send results. A few hundred lines.
+
+- **Phase 9** — somewhere to type. Browser page, or whispering a character
+  in-game.
+
+- **The live hand** — needs a GM account and a running worldserver, which you
+  deferred. Until it runs, "while playing without interruption" is a claim, not
+  a fact.
+
+
+Honest read: the hard, boring, easy-to-get-silently-wrong half is done. What's
+left is the visible half, and it's a smaller job than what's behind it —
+**except** the live-hand proof, which is the one that could still surprise us,
+because GM commands that only act on a selected target can't be driven from a
+script at all.
+
+
+Only four operations exist so far, and two of them are worth asking for in words
+(teleport, return). A useful vocabulary probably wants phase 3's equip/strip
+too, or the model will have very little to say.
 
 
 --------------------------------------------------------------------------------

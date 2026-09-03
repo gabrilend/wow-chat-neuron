@@ -178,8 +178,12 @@ end
 -- project position a fallback is a warning and a warning is an error.
 local cached_handle = nil
 
-function Deployment.load()
-    if cached_handle then
+-- `wanted_profile`, when given, overrides both the config and the deployment.
+-- It exists so a caller can point one window or one command at a different
+-- world without editing a file -- and, importantly, without leaving it edited
+-- afterwards, which is how a "temporary" change becomes permanent.
+function Deployment.load(wanted_profile)
+    if cached_handle and not wanted_profile then
         return cached_handle
     end
 
@@ -202,7 +206,7 @@ function Deployment.load()
     -- reading another, which is the same class of mistake as the two answers
     -- disagreeing -- just arrived at from the other direction.
     local deployment_profile = read_profile(config.root)
-    local profile   = config.profile or deployment_profile
+    local profile   = wanted_profile or config.profile or deployment_profile
     local databases = database_names(profile)
 
     -- Credentials come from two files with two different owners: the
@@ -217,8 +221,8 @@ function Deployment.load()
         root           = config.root,
         profile        = profile,
         deployment_profile = deployment_profile,
-        profile_overridden = (config.profile ~= nil)
-                             and (config.profile ~= deployment_profile),
+        profile_overridden = profile ~= deployment_profile,
+        profile_from_argument = wanted_profile ~= nil,
 
         mysql_binary   = mysql_binary(config.root),
         mysql_socket   = config.root .. "/mysql/databases/mysql.sock",

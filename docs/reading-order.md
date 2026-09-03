@@ -27,13 +27,16 @@ earlier in the count if that is where it belongs in the telling.
 | 015 | `src/015-retire.lua` | Removing characters completely. The one thing with no reverse. |
 | 016 | `src/016-dangling.lua` | Proving a removal was complete, and catching one that was not. |
 | 020 | `src/020-cli.lua` | The command line, so a person can pull the levers with no model involved. |
+| 021 | `src/021-chat-router.lua` | A sentence becomes an operation. The substrate a model will write to. |
+| 022 | `src/022-http-server.lua` | Three routes, so the window has something to talk to. |
+| 023 | `src/023-chat-main.lua` | Starting the window. |
 
 ## Reserved and not yet written
 
 | Index | Planned | Phase |
 |-------|---------|-------|
 | 017+ | scatter and formation, so a roster does not arrive as a pile | 2 |
-| 021+ | item lists, strip to holding, equip, loadouts | 3 |
+| 024+ | item lists, strip to holding, equip, loadouts | 3 |
 
 ## Tests
 
