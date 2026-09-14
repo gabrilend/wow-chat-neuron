@@ -1,0 +1,91 @@
+#!/bin/bash
+# test
+#
+# Run every test in the project and report a single total.
+#
+# Tests here are cheap and there are many of them on purpose: each one exists
+# because some property is invisible when it breaks. An enum whose members
+# stopped being unique still prints correctly and compares false everywhere; a
+# camera that unprojects slightly wrong looks like a creature being bad at
+# pointing. These are the only places such failures are visible.
+#
+# Usage:
+#   scripts/test                 run everything
+#   scripts/test enum            run only tests whose filename contains "enum"
+#   scripts/test /other/project  run against another checkout
+
+set -uo pipefail
+
+# {{{ set_dir
+DIR="/mnt/mtwo/games/azeroth-core/wow-chat-neuron"
+if [[ -n "${1:-}" && -d "${1:-}" && -d "${1:-}/tests" ]]; then
+    DIR="$1"
+    shift
+fi
+# }}}
+
+# {{{ paths
+TESTS="${DIR}/tests"
+FILTER="${1:-}"
+# }}}
+
+# {{{ run
+TOTAL_PASSED=0
+TOTAL_FAILED=0
+FILES=0
+FAILING_FILES=""
+
+for TEST_FILE in "${TESTS}"/*.test.lua; do
+    NAME="$(basename "${TEST_FILE}")"
+
+    if [[ -n "${FILTER}" && "${NAME}" != *"${FILTER}"* ]]; then
+        continue
+    fi
+
+    OUTPUT="$(luajit "${TEST_FILE}" 2>&1)"
+    STATUS=$?
+
+    SUMMARY="$(echo "${OUTPUT}" | tail -1)"
+    PASSED="$(echo "${SUMMARY}" | grep -o '[0-9]* passed' | grep -o '[0-9]*')"
+    FAILED="$(echo "${SUMMARY}" | grep -o '[0-9]* failed' | grep -o '[0-9]*')"
+
+    TOTAL_PASSED=$(( TOTAL_PASSED + ${PASSED:-0} ))
+    TOTAL_FAILED=$(( TOTAL_FAILED + ${FAILED:-0} ))
+    FILES=$(( FILES + 1 ))
+
+    if [[ ${STATUS} -ne 0 ]]; then
+        FAILING_FILES="${FAILING_FILES} ${NAME}"
+        printf '%-32s %s\n' "${NAME}" "${SUMMARY}"
+        # The failures themselves, not just the count -- a summary saying "3
+        # failed" with the three not shown is a summary that costs a second run.
+        echo "${OUTPUT}" | grep -A2 '^FAIL' | sed 's/^/    /'
+    else
+        printf '%-32s %s\n' "${NAME}" "${SUMMARY}"
+    fi
+done
+# }}}
+
+# {{{ the pages
+# The Lua tests never look at assets/, and twice now a one-character mistake in
+# a page's <script> has shipped -- which does not break the line it is on, it
+# breaks the entire script, so the page draws its markup, runs none of its code,
+# and reads as a subtle logic bug. Cheap to check, expensive to miss.
+echo ""
+"${DIR}/scripts/check-page" "" "${DIR}"
+PAGES_OK=$?
+# }}}
+
+# {{{ report
+echo ""
+echo "${FILES} files, ${TOTAL_PASSED} passed, ${TOTAL_FAILED} failed"
+
+if [[ ${PAGES_OK} -ne 0 ]]; then
+    echo "a page's javascript does not parse"
+    exit 1
+fi
+
+if [[ -n "${FAILING_FILES}" ]]; then
+    echo "failing:${FAILING_FILES}"
+    exit 1
+fi
+# }}}

@@ -1,0 +1,50 @@
+#!/bin/bash
+# ram-tier
+#
+# Make sure the project's two RAM-backed directories exist, and that the symlinks
+# pointing at them from inside the project resolve.
+#
+# Sourced by every script that writes an ephemeral file, because both tiers live
+# in memory and are GONE after a reboot -- at which point the symlinks inside the
+# project dangle, and `mkdir -p tmp/shared-memory/receipts` fails with the
+# genuinely confusing message "cannot create directory: File exists". It says
+# that because mkdir sees the symlink, not what the symlink points at.
+#
+# Two tiers, per the project convention:
+#   tmp/                -> /tmp/<project>              executable scratch
+#   tmp/shared-memory/  -> /dev/shm/<project>          logs, receipts, artifacts
+#
+# Usage, from another script:
+#   source "${DIR}/scripts/ram-tier"
+#   ensure_ram_tier "${DIR}"
+
+# {{{ ensure_ram_tier(project_dir)
+ensure_ram_tier() {
+    local project_dir="$1"
+    local project_name
+    project_name="$(basename "${project_dir}")"
+
+    local exec_tier="/tmp/${project_name}"
+    local memory_tier="/dev/shm/${project_name}"
+
+    # The targets first. Creating these through the symlinks would be creating
+    # them through links that do not resolve yet.
+    mkdir -p "${exec_tier}"
+    mkdir -p "${memory_tier}"
+
+    # The project's own entry point into the exec tier. Only created if absent --
+    # a real directory here rather than a link is somebody's deliberate choice
+    # and is left alone.
+    if [[ ! -e "${project_dir}/tmp" ]]; then
+        ln -s "${exec_tier}" "${project_dir}/tmp"
+    fi
+
+    # And the memory tier, reached from inside the exec tier so that one path
+    # prefix covers both.
+    if [[ ! -e "${exec_tier}/shared-memory" ]]; then
+        ln -s "${memory_tier}" "${exec_tier}/shared-memory"
+    fi
+
+    mkdir -p "${memory_tier}/receipts"
+}
+# }}}

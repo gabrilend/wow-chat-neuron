@@ -31,9 +31,11 @@ SHARED_MEMORY="${DIR}/tmp/shared-memory"
 # }}}
 
 # {{{ ensure_shared_memory
-# The shared-memory tier is RAM and is empty after every reboot, so anything
-# that writes a receipt has to be prepared to find it missing.
-mkdir -p "${SHARED_MEMORY}/receipts"
+# Both RAM tiers are empty after every reboot, and the symlinks pointing into
+# them dangle until they are recreated -- at which point mkdir through the link
+# fails saying "File exists", about the link rather than about the directory.
+source "${DIR}/scripts/ram-tier"
+ensure_ram_tier "${DIR}"
 # }}}
 
 # {{{ run
