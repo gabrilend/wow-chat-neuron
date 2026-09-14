@@ -7,8 +7,20 @@
 
 ## Current Behavior
 
-Nothing exists. There is no way to say which world neuron is talking about, so
-there is nothing for any operation to act on.
+**Built.** `src/000-deployment.lua` returns the handle, cached per process, and
+every operation in the project takes it as its first argument. The failure
+modes described below are all in place: a missing config file, an unreadable
+`.profile` and absent credentials each name the file and stop.
+
+The handle has grown from the twelve fields listed below to twenty-four. Four
+are configured; the rest are built by string concatenation from those four.
+
+That concatenation is what issue 101a changes. Every derived value encodes a
+convention belonging to this deployment rather than to AzerothCore, so neuron
+refuses a stock install — correctly, since it cannot find what it needs, and
+uselessly, since almost all of it is sitting in the server's own config files.
+The position below on deriving rather than configuring survives that change; it
+is narrowed to "read it from the file the server reads" rather than reversed.
 
 ## Intended Behavior
 

@@ -259,11 +259,39 @@ local function run_client(handle, database, statement)
                  .. "no DB_PASS, so there is nothing to authenticate with"
     end
 
+    -- The password goes in a mysql option file, not in the environment.
+    --
+    -- MYSQL_PWD was the lesser evil against a -p flag visible in `ps`, and both
+    -- are avoidable: an environment variable is inherited by every child
+    -- process and readable from /proc by the owner and by root. --defaults-file
+    -- is the mechanism mysql provides for exactly this, and the file is mode
+    -- 600 in the RAM tier.
+    local Keys = dofile(handle.neuron_root .. "/src/052-keys.lua")
+
+    local options, options_why = Keys.defaults_file(handle, handle.mysql_password)
+    if not options then
+        return nil, options_why
+    end
+
     local command = table.concat({
-        "MYSQL_PWD=" .. shell_quote(handle.mysql_password),
         shell_quote(handle.mysql_binary),
-        "--no-defaults",
-        "--socket=" .. shell_quote(handle.mysql_socket),
+        "--defaults-file=" .. shell_quote(options),
+        -- HOST AND PORT, not a socket path.
+        --
+        -- The socket was on the handle only because this deployment happens to
+        -- keep one locally, at a path built from the project root. A stock
+        -- install has no such file and its config names a host and a port --
+        -- which the local case also names, in the same line. So this reaches
+        -- both, and a handle field disappeared rather than gaining an override.
+        --
+        -- `--protocol=TCP` is explicit because the client silently prefers a
+        -- unix socket whenever the host is `localhost`, ignoring the port. A
+        -- deployment running two servers on one machine at different ports --
+        -- which is exactly what a profile switch produces -- would then reach
+        -- whichever one owns the default socket.
+        "--host="     .. shell_quote(handle.mysql_host),
+        "--port="     .. tostring(handle.mysql_port),
+        "--protocol=TCP",
         "--user="   .. shell_quote(handle.mysql_user),
         "--batch",
         "--raw",
@@ -407,7 +435,22 @@ function ColdHand.script(handle, database, statements, label)
         "MYSQL_PWD=" .. shell_quote(handle.mysql_password),
         shell_quote(handle.mysql_binary),
         "--no-defaults",
-        "--socket=" .. shell_quote(handle.mysql_socket),
+        -- HOST AND PORT, not a socket path.
+        --
+        -- The socket was on the handle only because this deployment happens to
+        -- keep one locally, at a path built from the project root. A stock
+        -- install has no such file and its config names a host and a port --
+        -- which the local case also names, in the same line. So this reaches
+        -- both, and a handle field disappeared rather than gaining an override.
+        --
+        -- `--protocol=TCP` is explicit because the client silently prefers a
+        -- unix socket whenever the host is `localhost`, ignoring the port. A
+        -- deployment running two servers on one machine at different ports --
+        -- which is exactly what a profile switch produces -- would then reach
+        -- whichever one owns the default socket.
+        "--host="     .. shell_quote(handle.mysql_host),
+        "--port="     .. tostring(handle.mysql_port),
+        "--protocol=TCP",
         "--user="   .. shell_quote(handle.mysql_user),
         "--batch",
         -- NO explicit stop-on-error flag is passed, and that is deliberate rather
@@ -457,25 +500,38 @@ end
 --   auth_failed     connected, credentials bad  -> fix DB_PASS
 --   up              a trivial query returned    -> proceed
 function ColdHand.probe(handle)
-    -- Existence is tested with os.rename(path, path), NOT io.open.
+    -- IS SOMETHING LISTENING, asked of the port rather than of a socket file.
     --
-    -- io.open on a live unix socket fails with ENXIO ("No such device or
-    -- address") because a socket cannot be opened as a stream. Using it here
-    -- would report socket_missing for a socket that plainly exists, which
-    -- collapses the one distinction this probe is for. rename-to-itself is a
-    -- no-op at the kernel level and succeeds for any path that exists,
-    -- whatever kind of file it is.
-    local exists, rename_error = os.rename(handle.mysql_socket, handle.mysql_socket)
-    if not exists then
-        if tostring(rename_error):find("No such file") then
-            return false, "socket_missing",
-                "no socket at " .. handle.mysql_socket .. " -- the deployment's MySQL has not been started"
-        end
-        -- Anything else means the path is there but we cannot see it properly --
-        -- a permissions problem on the directory, most likely. Reporting that as
-        -- "missing" would send someone to start a MySQL that is already running.
-        return false, "socket_unreadable",
-            "cannot check " .. handle.mysql_socket .. ": " .. tostring(rename_error)
+    -- This used to test for the socket with os.rename(path, path) -- io.open
+    -- fails on a live socket with "No such device or address", because a socket
+    -- cannot be opened as a stream, and would have reported a perfectly good
+    -- one as missing. That was a real subtlety and it is gone with the socket:
+    -- a port either accepts a connection or it does not, and the answer is the
+    -- same for a local server and a remote one.
+    --
+    -- The connection is opened and dropped without a word spoken. Nothing is
+    -- sent, nothing is read, and the server logs a connection that went away --
+    -- which is what any port check looks like from the other side.
+    local socket_ok, socket = pcall(require, "socket")
+
+    if not socket_ok then
+        return false, "no_socket_library",
+            "luasocket is not available, so the database port cannot be "
+         .. "checked. Every other part of neuron that speaks HTTP needs it too."
+    end
+
+    local probe = socket.tcp()
+    probe:settimeout(handle.probe_timeout or 2)
+
+    local connected, connect_why = probe:connect(handle.mysql_host,
+                                                 handle.mysql_port)
+    probe:close()
+
+    if not connected then
+        return false, "not_listening", string.format(
+            "nothing is listening at %s:%d -- the deployment's MySQL has not "
+         .. "been started.\n  The connection said: %s",
+            handle.mysql_host, handle.mysql_port, tostring(connect_why))
     end
 
     local rows, why = ColdHand.read(handle, handle.db_characters, "SELECT 1 AS ok")
@@ -488,9 +544,21 @@ function ColdHand.probe(handle)
         return false, "auth_failed", why
     end
 
-    return false, "socket_stale",
-        "a socket file exists at " .. handle.mysql_socket .. " but nothing answered "
-     .. "behind it -- a crashed MySQL leaves the file in place. Detail: " .. tostring(why)
+    -- Listening, and refusing to answer. A MySQL still starting up accepts
+    -- connections before it will serve a query, and one that is shutting down
+    -- does the same on the way out -- so this is a real state and not a
+    -- leftover, which is what the old "stale socket file" answer described.
+    return false, "not_answering", string.format(
+        "%s:%d accepted a connection and then would not answer a trivial "
+     .. "query.\n  Detail: %s\n\n"
+     .. "  To debug:\n"
+     .. "    Is it still starting?\n"
+     .. "      MySQL listens before it finishes recovering; wait and ask "
+     .. "again.\n"
+     .. "    Does the database named exist?\n"
+     .. "      The query ran against %s.",
+        handle.mysql_host, handle.mysql_port, tostring(why),
+        tostring(handle.db_characters))
 end
 -- }}}
 

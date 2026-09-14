@@ -30,12 +30,10 @@ are pointed at the wrong one.
 | `root` | string | Absolute path to the deployment |
 | `profile` | string | Active profile, read from the deployment's `.profile` |
 | `mysql_binary` | string | The deployment's own mysql client |
-| `mysql_socket` | string | Its unix socket |
 | `mysql_user` | string | Database user |
 | `mysql_password` | string or nil | From the deployment's `secrets.conf` |
 | `db_world` | string | `acore_world_<profile>` |
 | `db_characters` | string | `acore_characters_<profile>` |
-| `db_playerbots` | string | `acore_playerbots_<profile>` |
 | `soap_url` | string | The worldserver's SOAP endpoint |
 | `soap_account` | string | A game account holding GM rank |
 | `soap_password` | string or nil | From neuron's own `secrets.conf` |
