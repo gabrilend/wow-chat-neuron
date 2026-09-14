@@ -21,3 +21,11 @@ docs/ale/docs/
 *.swo
 *~
 .DS_Store
+
+# Credentials. One per file, mode 600. See secrets/README.md
+secrets/*
+!secrets/README.md
+
+# Conversations with a model. Plain text, dated. Kept because a bad plan can
+# only be debugged from what the model was told -- untracked because they grow.
+logs/

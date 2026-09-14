@@ -106,19 +106,47 @@ end
 -- --show-error keeps real transport failures visible, because a silent curl
 -- that failed looks exactly like a server that returned nothing.
 local function post(handle, body, timeout)
-    if not handle.soap_password then
-        return nil, nil, "no SOAP password -- neuron's secrets.conf has no "
-                      .. "NEURON_SOAP_PASSWORD, so there is nothing to "
-                      .. "authenticate the GM account with"
+    local Keys = dofile(handle.neuron_root .. "/src/052-keys.lua")
+
+    -- Read at the point of use and let go again. The credential exists in this
+    -- function and nowhere else -- not in the handle, not in a config table,
+    -- not in an environment variable.
+    local credential, why = Keys.read(handle.soap_key_path, "the SOAP key")
+    if not credential then
+        return nil, nil, why
     end
 
-    local credentials = handle.soap_account .. ":" .. handle.soap_password
+    -- The credential goes in a curl config file, not on the command line.
+    --
+    -- It used to be `--user account:password`, which is visible in `ps` output
+    -- to every user on the machine for as long as the request runs. That is the
+    -- exact hole a key file exists to close, and passing the key correctly all
+    -- the way to the last step and then putting it in an argument list would
+    -- close nothing.
+    local config_path = string.format("%s/tmp/shared-memory/soap-%d-%d.conf",
+        handle.neuron_root, os.time(), math.random(100000, 999999))
+
+    local config_file = io.open(config_path, "w")
+    if not config_file then
+        return nil, nil, string.format(
+            "cannot write a curl config at %s\n"
+         .. "  Without it the credential would have to go on the command line,\n"
+         .. "  where every user on this machine can read it, so this refuses\n"
+         .. "  rather than falling back.\n"
+         .. "  The RAM tier may be missing -- it is empty after every reboot and\n"
+         .. "  the run scripts recreate it.", config_path)
+    end
+
+    config_file:write(string.format('user = "%s:%s"\n',
+        handle.soap_account, credential))
+    config_file:close()
+    os.execute("chmod 600 " .. shell_quote(config_path))
 
     local command = table.concat({
         "curl",
         "-s", "--show-error",
         "--max-time", tostring(timeout or handle.probe_timeout or 3),
-        "--basic", "--user", shell_quote(credentials),
+        "--basic", "--config", shell_quote(config_path),
         "-H", shell_quote("Content-Type: application/xml"),
         "--data-binary", shell_quote(body),
         "--write-out", shell_quote("\n%{http_code}"),
@@ -128,10 +156,15 @@ local function post(handle, body, timeout)
 
     local pipe = io.popen(command, "r")
     if not pipe then
+        os.remove(config_path)
         return nil, nil, "could not start curl"
     end
     local output = pipe:read("*a")
     local ok, _, code = pipe:close()
+
+    -- Gone before anything is decided about the result, so that no early return
+    -- below can leave a credential in the RAM tier outliving the process.
+    os.remove(config_path)
 
     if not ok then
         -- curl's own exit codes distinguish the failures that matter here:
@@ -220,7 +253,7 @@ end
 --
 -- Four distinguishable outcomes with four different fixes:
 --
---   no_credentials      neuron's secrets.conf is missing NEURON_SOAP_PASSWORD
+--   no_credentials      no usable key at the configured soap_key path
 --   connection_refused  world down, OR SOAP disabled in its config
 --   soap_unauthorized   wrong account or password
 --   up                  answered a harmless command
@@ -228,9 +261,13 @@ end
 -- The probe command is `server info`, which reads and changes nothing. A probe
 -- that altered state would make merely asking "is it up?" a side effect.
 function LiveHand.probe(handle)
-    if not handle.soap_password then
-        return false, "no_credentials",
-            "neuron's secrets.conf has no NEURON_SOAP_PASSWORD"
+    -- Asked without ever holding the credential: `present` reads the file,
+    -- checks it, and returns only whether it was usable.
+    local Keys = dofile(handle.neuron_root .. "/src/052-keys.lua")
+
+    local have, why = Keys.present(handle.soap_key_path, "the SOAP key")
+    if not have then
+        return false, "no_credentials", why
     end
 
     local result, why = LiveHand.execute(handle, "server info")
@@ -287,6 +324,8 @@ LiveHand.COMMANDS = {
                                summary = "set a named character's level" },
     ["send items"]         = { addressing = "name",
                                summary = "mail items to a named character" },
+    ["announce"]           = { addressing = "none",
+                               summary = "say something to every player online" },
     ["reload"]             = { addressing = "none",
                                summary = "reload a server table or the Lua corpus" },
 }
