@@ -75,12 +75,27 @@ echo ""
 PAGES_OK=$?
 # }}}
 
+# {{{ the generated documents
+# Two documents are generated from the source and neither is read by anything
+# that would notice them going wrong. A stale table renders perfectly, and the
+# only consumer is a person who will believe it -- so being out of date is a
+# failure with no symptom, which is exactly what a test run is for.
+echo ""
+"${DIR}/scripts/reading-order" --check
+DOCS_OK=$?
+# }}}
+
 # {{{ report
 echo ""
 echo "${FILES} files, ${TOTAL_PASSED} passed, ${TOTAL_FAILED} failed"
 
 if [[ ${PAGES_OK} -ne 0 ]]; then
     echo "a page's javascript does not parse"
+    exit 1
+fi
+
+if [[ ${DOCS_OK} -ne 0 ]]; then
+    echo "a generated document is out of date -- run scripts/reading-order"
     exit 1
 fi
 

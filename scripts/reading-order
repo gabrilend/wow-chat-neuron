@@ -1,0 +1,88 @@
+#!/bin/bash
+# reading-order
+#
+# Rewrite the index of the project -- every source file, in the order somebody
+# should read them, with each file's own one-line description of itself.
+#
+# The source headers are the source; the table is generated from them. Only the
+# table is touched: the prose around it, and the list of indices reserved for
+# work not yet written, are left exactly as they are.
+#
+# Run it after adding a source file, after renumbering one, and after rewriting
+# the sentence at the top of one.
+#
+# Usage:
+#   scripts/reading-order                   rewrite docs/reading-order.md
+#   scripts/reading-order --stdout          print the table instead
+#   scripts/reading-order --check           say whether it is current, change nothing
+#   scripts/reading-order /other/project    run against another checkout
+
+set -euo pipefail
+
+# {{{ set_dir
+DIR="/mnt/mtwo/games/azeroth-core/wow-chat-neuron"
+if [[ -n "${1:-}" && -d "${1:-}" && -f "${1:-}/src/075-reading-order.lua" ]]; then
+    DIR="$1"
+    shift
+fi
+# }}}
+
+# {{{ paths
+READING_ORDER_LUA="${DIR}/src/075-reading-order.lua"
+DOCUMENT="${DIR}/docs/reading-order.md"
+# }}}
+
+# {{{ read_flags
+# --check writes to a scratch copy in the RAM tier and compares. Saying "this is
+# out of date" and saying "I have just brought it up to date" are different
+# answers, and a build step wants the first one without the second happening.
+MODE="write"
+
+case "${1:-}" in
+    --stdout)
+        MODE="stdout"
+        ;;
+    --check)
+        MODE="check"
+        ;;
+    "")
+        ;;
+    *)
+        echo "reading-order: no such option: ${1}" >&2
+        echo "  try --stdout, or --check, or no arguments at all" >&2
+        exit 2
+        ;;
+esac
+# }}}
+
+# {{{ run
+if [[ "${MODE}" == "write" ]]; then
+    exec luajit "${READING_ORDER_LUA}" "${DIR}" "${DOCUMENT}"
+fi
+
+# Both remaining modes need somewhere to put a copy. Both RAM tiers are empty
+# after a reboot and the links into them dangle until remade, so rebuild first.
+source "${DIR}/scripts/ram-tier"
+ensure_ram_tier "${DIR}"
+
+SCRATCH="${DIR}/tmp/shared-memory/reading-order-$$.md"
+cp "${DOCUMENT}" "${SCRATCH}"
+luajit "${READING_ORDER_LUA}" "${DIR}" "${SCRATCH}" --quiet
+
+if [[ "${MODE}" == "stdout" ]]; then
+    cat "${SCRATCH}"
+    rm -f "${SCRATCH}"
+    exit 0
+fi
+
+if diff -q "${DOCUMENT}" "${SCRATCH}" >/dev/null; then
+    echo "reading-order: docs/reading-order.md is current"
+    rm -f "${SCRATCH}"
+    exit 0
+fi
+
+echo "reading-order: docs/reading-order.md is out of date" >&2
+diff "${DOCUMENT}" "${SCRATCH}" >&2 || true
+rm -f "${SCRATCH}"
+exit 1
+# }}}
