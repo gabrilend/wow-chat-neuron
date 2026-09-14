@@ -1,5 +1,5 @@
 --------------------------------------------------------------------------------
--- 026-hands.lua
+-- 027-hands.lua
 --
 -- The four ways of reaching the world, as an enum. This is the column the
 -- vocabulary table calls `hands`, and the key the mechanism dispatch table is

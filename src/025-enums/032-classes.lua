@@ -1,5 +1,5 @@
 --------------------------------------------------------------------------------
--- 031-classes.lua
+-- 032-classes.lua
 --
 -- The nine playable classes of 3.3.5a, as an enum.
 --

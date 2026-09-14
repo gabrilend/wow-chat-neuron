@@ -1,5 +1,5 @@
 --------------------------------------------------------------------------------
--- 027-kinds.lua
+-- 028-kinds.lua
 --
 -- What running an operation costs. The `k` column of the vocabulary table.
 --

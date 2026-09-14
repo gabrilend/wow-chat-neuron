@@ -1,5 +1,5 @@
 --------------------------------------------------------------------------------
--- 030-stats.lua
+-- 031-stats.lua
 --
 -- The five primary attributes, as an enum, with the indices the game uses.
 --

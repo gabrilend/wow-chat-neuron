@@ -1,5 +1,5 @@
 --------------------------------------------------------------------------------
--- 029-slots.lua
+-- 030-slots.lua
 --
 -- The nineteen equipment slots, as an enum, with the numbers the game uses.
 --

@@ -1,5 +1,5 @@
 --------------------------------------------------------------------------------
--- 025-enum.lua
+-- 026-enum.lua
 --
 -- A closed, ordered set of named members, where a member is a unique table
 -- rather than a string.
