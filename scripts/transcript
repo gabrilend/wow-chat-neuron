@@ -1,0 +1,212 @@
+#!/usr/bin/env bash
+# -----------------------------------------------------------------------------
+# transcript -- read a conversation, in one piece or in halves.
+#
+# A conversation lives in two files. What people said is in one; the
+# instructions and the answers tool calls gave are in the other, named the same
+# with `_for_robots` before the extension. Each writes a signpost where the
+# other picks up, and this puts them back together in the order they happened.
+#
+# Reading and editing are different things and this does both. Everything that
+# PRINTS is a rendering -- stitched, or one half, or the atoms -- built fresh and
+# thrown away. `--edit` opens the files themselves, because opening a copy would
+# not be editing; it would be duplicating and then altering the duplicate, and
+# whatever you fixed would still be wrong in the record.
+#
+# Which files --edit opens depends on what you asked to see: --human opens the
+# half people are in, --robots the machine's, and neither opens both at once.
+# There is no editing the stitched view, because the stitched view is not a
+# file -- it is the two halves walked in order.
+#
+# Usage:
+#   scripts/transcript                       list conversations, newest first
+#   scripts/transcript <id>                  the whole thing, stitched, to stdout
+#   scripts/transcript <id> --edit           open the real files in $EDITOR
+#   scripts/transcript <id> --human          only what people said
+#   scripts/transcript <id> --robots         only the machine's half
+#   scripts/transcript <id> --said           only the words, no tool lines
+#   scripts/transcript <id> --raw            both files as they sit on disk
+#   scripts/transcript <id> --atoms          the pieces, and what has been cut
+#   scripts/transcript --dir /path/to/neuron  work on another checkout
+#   scripts/transcript --help                this
+#
+# An id looks like 2026-09-06/013000-beef. A bare time works too -- 013000-beef
+# -- and today's date is assumed.
+#
+# To cut something out of a conversation, use `scripts/neuron atoms`. This only
+# reads.
+# -----------------------------------------------------------------------------
+
+set -uo pipefail
+
+# {{{ settings
+DIR="/mnt/mtwo/games/azeroth-core/wow-chat-neuron"
+MODE="stitched"
+EDIT="no"
+ID=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dir)     DIR="$2"; shift 2 ;;
+        --edit)    EDIT="yes"; shift ;;
+        --human)   MODE="human"; shift ;;
+        --robots)  MODE="robots"; shift ;;
+        --said)    MODE="said"; shift ;;
+        --raw)     MODE="raw"; shift ;;
+        --atoms)   MODE="atoms"; shift ;;
+        --help|-h|help)
+            # Everything from line 2 until the first line that is not a
+            # comment. A fixed line range goes stale the moment the header
+            # grows, and then the help prints shell code.
+            awk 'NR>1 { if ($0 !~ /^#/) exit; sub(/^# ?/, ""); print }' "$0"
+            exit 0 ;;
+        -*)  echo "transcript: no such option: $1  (try --help)" >&2; exit 2 ;;
+        *)   ID="$1"; shift ;;
+    esac
+done
+# }}}
+
+# {{{ ram tier
+# `tmp/` is a symlink into /tmp, and /tmp is cleaned -- by a reboot, by systemd,
+# by anything -- which leaves the link dangling and every write through it
+# failing with a message about the link rather than about the directory.
+source "${DIR}/scripts/ram-tier"
+ensure_ram_tier "${DIR}"
+# }}}
+
+# {{{ listing
+if [[ -z "${ID}" ]]; then
+    echo ""
+    echo "  conversations, newest first"
+    echo ""
+    luajit -e '
+        local root = "'"${DIR}"'"
+        local Deployment = dofile(root .. "/src/000-deployment.lua")
+        local Transcript = dofile(root .. "/src/067-transcript.lua")
+        local handle = Deployment.load()
+
+        for _, one in ipairs(Transcript.list(handle, 40)) do
+            print(string.format("  %-26s %3d said  %3d called%s  %s",
+                one.id, one.turns, one.calls,
+                one.old_format and "  [one file, from before the split]" or "",
+                (one.asked or ""):sub(1, 46)))
+        end
+    '
+    echo ""
+    echo "  scripts/transcript <id>          the whole thing"
+    echo "  scripts/transcript <id> --edit   the same, in \$EDITOR"
+    echo ""
+    exit 0
+fi
+# }}}
+
+# {{{ today's date, when the id has none
+if [[ "${ID}" != */* ]]; then
+    ID="$(date +%Y-%m-%d)/${ID}"
+fi
+# }}}
+
+# {{{ raw -- both files exactly as they are
+if [[ "${MODE}" == "raw" ]]; then
+    DATE="${ID%%/*}"
+    NAME="${ID##*/}"
+    for HALF in "" "_for_robots" "_edits"; do
+        FILE="${DIR}/logs/asking/${DATE}/${NAME}${HALF}.txt"
+        [[ -f "${FILE}" ]] || continue
+        echo ""
+        echo "########## ${FILE}"
+        echo ""
+        cat "${FILE}"
+    done
+    exit 0
+fi
+# }}}
+
+# {{{ which files --edit opens
+# The real ones. A stitched view is not a file -- it is the two halves walked in
+# order -- so there is nothing there to open; --edit on it opens both halves and
+# lets the editor put them in windows.
+DATE="${ID%%/*}"
+NAME="${ID##*/}"
+HUMAN="${DIR}/logs/asking/${DATE}/${NAME}.txt"
+ROBOTS="${DIR}/logs/asking/${DATE}/${NAME}_for_robots.txt"
+EDITS="${DIR}/logs/asking/${DATE}/${NAME}_edits.txt"
+
+case "${MODE}" in
+    human|said) EDIT_FILES=("${HUMAN}") ;;
+    robots)     EDIT_FILES=("${ROBOTS}") ;;
+    atoms)      EDIT_FILES=("${EDITS}") ;;
+    *)          EDIT_FILES=("${HUMAN}" "${ROBOTS}") ;;
+esac
+
+if [[ "${EDIT}" == "yes" ]]; then
+    for FILE in "${EDIT_FILES[@]}"; do
+        if [[ ! -f "${FILE}" ]]; then
+            # The edit log is the one that legitimately may not exist yet:
+            # nothing has been pruned. Creating it empty is right; a missing
+            # transcript half is not.
+            if [[ "${FILE}" == "${EDITS}" ]]; then
+                touch "${FILE}"
+            else
+                echo "transcript: no such file: ${FILE}" >&2
+                echo "  scripts/transcript with no argument lists what there is." >&2
+                exit 1
+            fi
+        fi
+    done
+fi
+# }}}
+
+# {{{ render
+OUT="${DIR}/tmp/shared-memory/transcript-$(echo "${ID}" | tr '/' '-')-${MODE}.txt"
+
+luajit -e '
+    local root = "'"${DIR}"'"
+    local id   = "'"${ID}"'"
+    local mode = "'"${MODE}"'"
+
+    local Deployment = dofile(root .. "/src/000-deployment.lua")
+    local Transcript = dofile(root .. "/src/067-transcript.lua")
+    local handle = Deployment.load()
+
+    -- A dispatch table, so adding a way to look at a conversation is one row.
+    local RENDER = {
+        stitched = Transcript.stitched,
+        human    = Transcript.human,
+        said     = Transcript.said,
+        robots   = function(h, i) return Transcript.read(h, i, "robots") end,
+        atoms    = function(h, i)
+            local lines = {}
+            table.insert(lines, string.format("%-5s %-8s %6s %8s  %s",
+                "atom", "state", "blocks", "chars", "what is in it"))
+            for _, atom in ipairs(Transcript.atoms(h, i)) do
+                table.insert(lines, string.format("%-5d %-8s %6d %8d  %s",
+                    atom.section, atom.state, atom.blocks, atom.characters,
+                    atom.says or atom.opens))
+            end
+            return table.concat(lines, "\n")
+        end,
+    }
+
+    local text = RENDER[mode](handle, id)
+
+    if not text then
+        io.stderr:write("no conversation at " .. id .. ".\n"
+            .. "  scripts/transcript with no argument lists them.\n")
+        os.exit(1)
+    end
+
+    local out = io.open("'"${OUT}"'", "w")
+    out:write(text)
+    out:close()
+' || exit 1
+# }}}
+
+# {{{ show it
+if [[ "${EDIT}" == "yes" ]]; then
+    cat "${OUT}" >/dev/null   # the render above also proves the id exists
+    "${EDITOR:-vi}" "${EDIT_FILES[@]}"
+else
+    cat "${OUT}"
+fi
+# }}}
