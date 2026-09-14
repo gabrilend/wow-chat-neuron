@@ -1,0 +1,2089 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>neuron</title>
+<style>
+/* ---------------------------------------------------------------------------
+   The front door. One level above everything else.
+
+   It assumes nothing. Not that a server is running, not that a database
+   answered, not that whoever is reading knows a script name. Every row says
+   what the thing IS before it says whether it is up, because "authserver:
+   down" tells somebody who already knows nothing they did not.
+
+   Nothing is fetched. No fonts, no icons, no scripts from anywhere -- the
+   machine this drives may have no internet, and so must the page that drives
+   it.
+   --------------------------------------------------------------------------- */
+
+:root {
+  --ink:        #d8d2c4;
+  --dim:        #8a8375;
+  --gold:       #ffd100;
+  --gold-deep:  #a67c00;
+  --gold-edge:  #6b4f00;
+  --frame:      #0a0a0c;
+  --frame-soft: #14141a;
+
+  --up:      #40ff40;
+  --down:    #ff6040;
+  --waiting: #ffff00;
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; margin: 0; }
+
+body {
+  background: var(--frame);
+  color: var(--ink);
+  font: 14px/1.55 ui-monospace, "DejaVu Sans Mono", Menlo, Consolas, monospace;
+  padding: 28px 20px 0;
+}
+
+.sheet { max-width: 860px; margin: 0 auto; }
+
+.footer {
+  margin-top: 44px; padding: 20px 0 0;
+  border-top: 1px solid var(--gold-edge);
+  color: var(--dim); font-size: 12px;
+  display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap;
+  /* Most of a screen of room under the footer. The page used to stop dead at
+     its final row, so whatever you had scrolled to sat pinned against the
+     bottom edge -- readable, and looking like the page had been cut off. The
+     room lives here rather than on the body so it is UNDER the footer, not
+     between the footer and the last section. */
+  margin-bottom: 70vh;
+}
+.footer a { color: var(--dim); border-bottom-color: #26262c; }
+.footer a:hover { color: var(--gold); }
+
+h1 {
+  font-size: 22px; font-weight: 600; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--gold);
+  margin: 0 0 2px;
+}
+
+.whereabouts { color: var(--dim); font-size: 12px; margin-bottom: 28px; }
+.whereabouts b { color: var(--ink); font-weight: 600; }
+/* The deployment path and the profile names are things you press, and at this
+   size a full-height button reads as a form rather than as a line of prose. */
+.whereabouts button { margin: 0 2px; padding: 3px 9px; font-size: 11.5px; }
+.override { color: var(--waiting); }
+
+h2 {
+  font-size: 12px; font-weight: 600; letter-spacing: .18em;
+  text-transform: uppercase; color: var(--gold-deep);
+  margin: 32px 0 10px; padding-bottom: 6px;
+  border-bottom: 1px solid var(--gold-edge);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 14px 1fr auto;
+  gap: 12px; align-items: start;
+  padding: 11px 0;
+  border-bottom: 1px solid #1c1c22;
+}
+.row:last-child { border-bottom: 0; }
+
+.lamp { font-size: 13px; line-height: 1.5; }
+.lamp.on  { color: var(--up); }
+.lamp.off { color: var(--down); }
+.lamp.warn { color: var(--waiting); }
+/* No class at all: a dotted circle, meaning nobody has asked yet. Distinct from
+   both green and red, because "unknown" is a real third answer and showing it
+   as red would be a lie about something that may well be running. */
+.lamp { color: var(--dim); }
+
+.name { color: var(--ink); font-weight: 600; }
+.name .port { color: var(--dim); font-weight: 400; margin-left: 8px; font-size: 12px; }
+.what { color: var(--dim); font-size: 12.5px; margin-top: 2px; }
+
+.buttons { display: flex; gap: 6px; align-items: center; }
+
+button {
+  font: inherit; font-size: 12px;
+  background: var(--frame-soft);
+  color: var(--gold);
+  border: 1px solid var(--gold-edge);
+  padding: 5px 12px; cursor: pointer;
+  letter-spacing: .06em;
+}
+button:hover:not(:disabled) { background: #1e1e26; border-color: var(--gold-deep); }
+button:disabled { color: #4a463d; border-color: #26262c; cursor: default; }
+button.quiet { color: var(--dim); }
+/* A disabled quiet button was keeping the dim-but-readable colour, so the two
+   greyed-out buttons in one row did not look equally unavailable -- stop read
+   as pressable and start did not. `quiet` is more specific than `:disabled`
+   alone, so this has to say both. */
+button.quiet:disabled { color: #4a463d; }
+button.chosen { color: var(--gold); border-color: var(--gold-deep);
+                background: #1e1e26; }
+/* Armed. One more click and something is gone. */
+button.danger, button.danger:hover:not(:disabled) {
+  color: #fff; border-color: var(--down); background: #4a1408;
+}
+
+/* Held down.
+   :active is the browser's own answer to "is a mouse button currently down on
+   this element" -- it applies from mousedown until release and it clears
+   itself, including when the pointer is dragged off, which a class toggled by
+   javascript would get wrong. It costs no script at all.
+   The border is the SELECTED border, so a press reads as reaching for that
+   state; the interior is lit rather than dimmed, so the press reads as
+   pressure rather than as being switched off. Nothing else on this page
+   changed the moment somebody clicked. */
+button:active:not(:disabled) {
+  border-color: var(--gold);
+  background: var(--gold-edge);
+  color: #fff;
+  transform: translateY(1px);
+}
+
+a { color: var(--gold); text-decoration: none; border-bottom: 1px solid var(--gold-edge); }
+a:hover { color: #fff; }
+
+.said {
+  white-space: pre-wrap;
+  background: var(--frame-soft);
+  border-left: 2px solid var(--gold-edge);
+  padding: 10px 14px; margin: 10px 0 0;
+  font-size: 12.5px; color: var(--ink);
+}
+.said.bad  { border-left-color: var(--down); }
+.said.done { border-left-color: var(--up); }
+
+.panel { position: relative; margin-top: 10px; }
+.panel .shut {
+  position: absolute; top: 6px; right: 6px; z-index: 2;
+  padding: 1px 8px; font-size: 12px; line-height: 1.4;
+  background: var(--frame); color: var(--dim);
+}
+.panel .shut:hover { color: var(--gold); border-color: var(--gold-deep); }
+.panel .said, .panel .log { margin-top: 0; }
+
+.keyline { display: flex; gap: 6px; margin-top: 8px; }
+.keyline input {
+  flex: 1; font: inherit; font-size: 12px;
+  background: #08080a; color: var(--ink);
+  border: 1px solid #26262c; padding: 5px 9px;
+}
+.keyline input:focus { outline: none; border-color: var(--gold-edge); }
+/* A field's name, beside it rather than inside it. A placeholder disappears
+   the moment somebody types, which is exactly when they want to check what
+   they are filling in. */
+.keyline select {
+  font: inherit; font-size: 12px;
+  background: #08080a; color: var(--ink);
+  border: 1px solid #26262c; padding: 5px 9px;
+}
+.keyline select:focus { outline: none; border-color: var(--gold-edge); }
+
+.keyline label {
+  color: var(--dim); font-size: 12px; min-width: 74px;
+  align-self: center; letter-spacing: .04em;
+}
+/* What to type at the server, in the colour the server answers in. */
+pre.console {
+  background: #08080a; border-left: 2px solid var(--gold-edge);
+  padding: 10px 12px; margin: 8px 0 12px;
+  font-size: 12.5px; color: #40e0e0; white-space: pre; overflow-x: auto;
+}
+
+/* The dim is the point: everything behind it stops asking for attention. */
+/* Stacked. The library is the bottom layer, the profile panel sits over it,
+   and the confirm dialog sits over both -- because a question raised BY a
+   panel has to be readable above the panel that raised it. */
+.veil {
+  position: fixed; inset: 0; background: rgba(0,0,0,.72);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 10; transition: opacity .45s;
+}
+#veil { z-index: 16; }
+/* `hidden` sets display:none in the browser's own stylesheet, and ANY author
+   rule setting display beats it -- so `display:flex` above made hidden mean
+   nothing, and the page loaded with an empty veil over it whose buttons had no
+   handlers yet. Author-level rule, restoring what the attribute promises. */
+.veil[hidden] { display: none; }
+.veil.going { opacity: 0; pointer-events: none; }
+
+/* Where else you can go. Anchored under the button that opens it. */
+.menu {
+  position: absolute; z-index: 12;
+  background: var(--frame-soft); border: 1px solid var(--gold-edge);
+  padding: 6px 0; min-width: 200px;
+}
+.menu a {
+  display: block; padding: 7px 16px; border: 0;
+  color: var(--gold); font-size: 12.5px; letter-spacing: .04em;
+}
+.menu a:hover { background: #1e1e26; color: #fff; }
+/* The page you are already on. Listed rather than omitted, so the menu reads
+   the same everywhere and can be copied without editing. */
+.menu a.here { color: var(--dim); }
+.menu a.here:hover { background: none; color: var(--dim); cursor: default; }
+
+/* The library opens over the page rather than beside it. It is reference, read
+   once and closed, and a column that pushed the page sideways would make the
+   thing you were doing move. */
+/* ANCHORED AT THE TOP, not centred.
+   A centred panel moves when its contents change, so expanding a section
+   slides everything you were reading upward -- and the thing you clicked ends
+   up somewhere else. Pinned to the top, it only ever grows downward. */
+.veil.top { align-items: flex-start; padding-top: 40px; }
+
+.drawer {
+  background: var(--frame); border: 1px solid var(--gold-edge);
+  padding: 24px 28px; width: min(820px, calc(100% - 40px));
+  max-height: calc(100% - 80px); overflow-y: auto;
+  position: relative;
+}
+.drawer details { border-bottom: 1px solid #1c1c22; }
+.drawer details:last-of-type { border-bottom: 0; }
+.drawer summary {
+  cursor: pointer; list-style: none;
+  font-size: 12px; font-weight: 600; letter-spacing: .18em;
+  text-transform: uppercase; color: var(--gold-deep);
+  padding: 14px 0 10px;
+}
+.drawer summary::-webkit-details-marker { display: none; }
+.drawer summary::before { content: '\25b8  '; color: var(--gold-edge); }
+.drawer details[open] > summary::before { content: '\25be  '; }
+.drawer summary:hover { color: var(--gold); }
+/* A word that cannot be used here. Dimmed rather than hidden: knowing it
+   exists and why you cannot reach it is the actionable answer. */
+.drawer .row[data-off] .name,
+.drawer .row[data-off] .params { color: var(--dim); }
+.drawer .row[data-off] .glyph  { color: var(--down); }
+
+.drawer summary .count { color: var(--dim); font-weight: 400;
+                         letter-spacing: 0; text-transform: none;
+                         font-size: 12px; margin-left: 8px; }
+.drawer h3 {
+  font-size: 12px; font-weight: 600; letter-spacing: .18em;
+  text-transform: uppercase; color: var(--gold-deep);
+  margin: 28px 0 4px; padding-bottom: 6px;
+  border-bottom: 1px solid var(--gold-edge);
+}
+.drawer .shut {
+  position: absolute; top: 10px; right: 12px;
+  background: none; border: 0; color: var(--dim); font-size: 20px;
+  padding: 0 6px; line-height: 1;
+}
+.drawer .shut:hover { color: var(--gold); }
+
+.dialog {
+  background: var(--frame-soft); border: 1px solid var(--gold-edge);
+  padding: 22px 24px; max-width: 520px; width: calc(100% - 40px);
+}
+.dialog h3 {
+  margin: 0 0 10px; font-size: 13px; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--gold);
+}
+.dialog p { margin: 0 0 14px; color: var(--dim); font-size: 12.5px; }
+.dialog .steps {
+  font-size: 12.5px; margin: 14px 0; min-height: 20px;
+  white-space: pre-wrap; color: var(--ink);
+}
+.dialog .steps .done { color: var(--up); }
+.dialog .steps .fail { color: var(--down); }
+
+@keyframes turn { to { transform: rotate(360deg); } }
+.spinner {
+  display: inline-block; width: 10px; height: 10px; margin-right: 8px;
+  border: 2px solid var(--gold-edge); border-top-color: var(--gold);
+  border-radius: 50%; animation: turn .8s linear infinite;
+  vertical-align: -1px;
+}
+/* In a lamp column, where it stands in for the circle rather than sitting
+   beside a word. Amber, matching what the lamp would have been. */
+.lamp .spinner {
+  margin: 2px 0 0; width: 9px; height: 9px;
+  border-color: #4a3f00; border-top-color: var(--waiting);
+}
+
+pre.log {
+  white-space: pre; overflow-x: auto;
+  background: #08080a; border: 1px solid #1c1c22;
+  padding: 12px; margin: 10px 0 0;
+  font-size: 11.5px; color: var(--dim);
+  max-height: 340px;
+}
+
+/* A heading INSIDE a section, for when one section holds two unrelated
+   things. The remote model and the local one were in one list, which read as
+   though the remote one somehow ran on the local one. */
+h3.sub {
+  font-size: 11px; font-weight: 600; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--dim);
+  margin: 18px 0 2px;
+}
+h3.sub:first-child { margin-top: 4px; }
+/* A line under the heading, so the rows below plainly belong to it. Two
+   unrelated services in one section read as one thing without it -- which is
+   how a remote model came to look as though it ran on the local one. */
+h3.sub.ruled { border-bottom: 1px solid #1c1c22; padding-bottom: 8px; }
+h3.sub.ruled + .note { margin-top: 8px; }
+
+.words .row { grid-template-columns: 16px 1fr; }
+.glyph { color: var(--gold-deep); font-weight: 600; }
+.glyph.final { color: var(--down); }
+.params { color: var(--dim); font-size: 12px; }
+
+
+
+
+.note { color: var(--dim); font-size: 12px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="sheet">
+
+  <div class="veil" id="veil" hidden>
+    <div class="dialog">
+      <h3 id="dialog-title"></h3>
+      <p id="dialog-body"></p>
+      <div class="steps" id="dialog-steps"></div>
+      <pre class="log" id="dialog-log" hidden style="max-height:180px"></pre>
+      <div class="buttons">
+        <button id="dialog-ok">ok</button>
+        <button class="quiet" id="dialog-no">cancel</button>
+        <button class="quiet" id="dialog-close" hidden>close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- The stamp first, then the two buttons under it. They are what you press
+       BECAUSE of what the stamp says, so reading downward is reading in the
+       order somebody thinks in. -->
+  <div style="float:right;text-align:right">
+    <div class="note" id="asof"></div>
+    <div class="buttons" style="justify-content:flex-end;margin-top:4px">
+      <button class="quiet" id="reread">&#x27f3; refresh</button>
+      <button class="quiet" id="hamburger" title="everywhere else">&#9776;</button>
+    </div>
+  </div>
+  <h1>neuron</h1>
+  <div class="whereabouts" id="whereabouts">reading&hellip;</div>
+  <h2>services</h2>
+  <div id="services"></div>
+  <div class="panel" id="acted" hidden>
+    <button class="shut" data-shut="acted">&times;</button>
+    <div class="said" id="acted-text"></div>
+  </div>
+  <div class="panel" id="log-panel" hidden>
+    <button class="shut" id="log-shut">hide</button>
+    <div class="note" id="log-title" style="margin:0 0 4px"></div>
+    <pre class="log" id="log"></pre>
+    <div class="keyline" id="console-line" hidden>
+      <input id="console" autocomplete="off"
+             placeholder="type a command for the server">
+      <button id="console-send">send</button>
+    </div>
+    <div class="note" id="console-why" hidden></div>
+  </div>
+
+  <h2>chat</h2>
+  <div class="panel" id="acted-asking" hidden>
+    <button class="shut" data-shut="acted-asking">&times;</button>
+    <div class="said" id="acted-asking-text"></div>
+  </div>
+  <div id="asking"></div>
+
+
+  <h2>conversations</h2>
+  <div class="panel" id="acted-chats" hidden>
+    <button class="shut" data-shut="acted-chats">&times;</button>
+    <div class="said" id="acted-chats-text"></div>
+  </div>
+  <div id="chats"></div>
+  <div id="past"></div>
+  <div class="panel" id="conversation-panel" hidden></div>
+  <pre class="log" id="conversation" hidden></pre>
+
+  <h2>deployment</h2>
+  <div class="panel" id="acted-deployment" hidden>
+    <button class="shut" data-shut="acted-deployment">&times;</button>
+    <div class="said" id="acted-deployment-text"></div>
+  </div>
+  <div id="deployment"></div>
+  <div class="panel" id="picker" hidden>
+    <button class="shut" data-shut="picker">&times;</button>
+    <div class="note">The path to an AzerothCore deployment, on the machine
+      running this menu. It is checked before anything is changed.</div>
+    <div class="keyline">
+      <input id="picker-path" autocomplete="off"
+             placeholder="/path/to/the/deployment">
+      <button id="picker-use">use this one</button>
+    </div>
+  </div>
+
+  <h2 id="receipts-heading" hidden>what was done</h2>
+  <div id="receipts" hidden></div>
+
+  <h2 id="world-heading" hidden>the world</h2>
+  <div id="world" hidden></div>
+
+</div>
+
+<!-- The library. Every word neuron knows, one level off the front page.
+     It is reference: it changes when the code changes and never otherwise,
+     and it was sitting underneath the things somebody opens this page to
+     act on. -->
+<!-- The hamburger. Deliberately dumb and deliberately the same on every page:
+     a list of where you can go, including where you already are. The entry for
+     the page you are on does nothing, which is what makes this block
+     copy-and-pasteable rather than something each page has to think about. -->
+<div class="menu" id="hamburger-menu" hidden>
+  <a href="/" class="here">main menu</a>
+  <a href="#" id="library-open">library</a>
+  <a href="/guide" target="_blank">setting up a model</a>
+  <a href="/server" target="_blank">setting up the game server</a>
+</div>
+
+<!-- Which profile. Above the library in the stack, because switching one can
+     raise its own question -- about the servers holding the old databases --
+     and that question must sit above whatever raised it. -->
+<!-- Choosing a config file. A modal rather than an inline panel, because it
+     is a decision with a list behind it -- the same shape as the dialog that
+     offers to stop the servers before a profile switch, with a text field
+     instead of a single yes. -->
+<!-- Either model's settings. One form for both, because they have the same
+     ones -- what differs is only where they get written. -->
+<div class="veil top" id="asking-veil" hidden style="z-index:15">
+  <div class="drawer" style="width:min(620px, calc(100% - 40px))">
+    <button class="shut" id="asking-shut">hide</button>
+    <h2 style="margin-top:0" id="asking-title"></h2>
+    <div class="note" id="asking-why" style="margin-bottom:14px"></div>
+
+    <div class="keyline">
+      <label for="asking-scheme">protocol</label>
+      <select id="asking-scheme">
+        <option value="http">http</option>
+        <option value="https">https</option>
+      </select>
+    </div>
+    <div class="keyline">
+      <label for="asking-host">address</label>
+      <input id="asking-host" autocomplete="off" placeholder="127.0.0.1">
+    </div>
+    <div class="keyline">
+      <label for="asking-port">port</label>
+      <input id="asking-port" autocomplete="off"
+             placeholder="blank for the protocol's own">
+    </div>
+    <div class="keyline">
+      <label for="asking-path">path</label>
+      <input id="asking-path" autocomplete="off" placeholder="/api/chat">
+    </div>
+    <div class="keyline">
+      <label for="asking-model">model</label>
+      <input id="asking-model" autocomplete="off">
+    </div>
+    <div class="keyline">
+      <label for="asking-dialect">format</label>
+      <select id="asking-dialect">
+        <option value="anthropic">anthropic</option>
+        <option value="ollama">ollama</option>
+      </select>
+    </div>
+    <div class="keyline">
+      <label for="asking-timeout">timeout</label>
+      <input id="asking-timeout" autocomplete="off" placeholder="seconds">
+      <button id="asking-use">use these</button>
+    </div>
+
+    <div class="note" style="margin-top:16px">
+      <b>format</b> is the shape of the request on the wire, not the company
+      that answers it. <b>anthropic</b> is Claude&rsquo;s. <b>ollama</b> is
+      what a local server speaks, and it is close enough to the
+      OpenAI-compatible shape that most hosted services answer it too.
+      Either model can point anywhere &mdash; a local one at
+      <code>http://127.0.0.1:11434/api/chat</code>, a hosted one at
+      <code>https://api.anthropic.com/v1/messages</code> with the port left
+      blank.
+    </div>
+  </div>
+</div>
+
+<div class="veil top" id="config-veil" hidden style="z-index:15">
+  <div class="drawer" style="width:min(760px, calc(100% - 40px))">
+    <button class="shut" id="config-shut">&times;</button>
+    <h2 style="margin-top:0" id="config-title"></h2>
+    <div class="note" id="config-why" style="margin-bottom:14px"></div>
+    <div class="keyline">
+      <label for="config-path">path</label>
+      <input id="config-path" autocomplete="off">
+      <button id="config-use">use this</button>
+      <button class="quiet" id="config-find">detect</button>
+    </div>
+    <div id="config-found"></div>
+  </div>
+</div>
+
+<div class="veil top" id="profile-veil" hidden style="z-index:14">
+  <div class="drawer" style="width:min(520px, calc(100% - 40px))">
+    <button class="shut" id="profile-shut">&times;</button>
+    <h2 style="margin-top:0">profile</h2>
+    <div class="note" style="margin-bottom:14px">Which set of databases,
+      configuration and installed files neuron is pointed at. Everything
+      downstream is derived from this one word.</div>
+    <div id="profile-list"></div>
+  </div>
+</div>
+
+<div class="veil top" id="library-veil" hidden>
+  <div class="drawer">
+    <button class="shut" id="library-shut">&times;</button>
+    <h2 style="margin-top:0">what neuron can be asked to do</h2>
+    <div id="library"></div>
+  </div>
+</div>
+<script>
+// Everything the page knows comes from one request. Six would be six chances to
+// be half-drawn about what is running, and a menu that is half-right about that
+// is worse than one that is slow.
+
+const $ = id => document.getElementById(id);
+
+// Show that a press was heard, for as long as it takes.
+//
+// A check is a request over the network and can take several seconds. Nothing
+// on the page moved while it was in flight, so the only way to find out whether
+// a click had registered was to press it again -- which sends a second request
+// and makes the wait longer.
+//
+// The spinner goes to the LEFT of the button and the button goes dead, both for
+// the duration. The section redraw at the end of the refresh removes the
+// spinner along with everything else it replaces; the button is re-enabled
+// anyway, because a redraw that failed would otherwise leave it dead forever.
+async function working(button, run) {
+  const spinner = document.createElement('span');
+  spinner.className = 'spinner';
+  button.parentNode.insertBefore(spinner, button);
+  button.disabled = true;
+
+  try {
+    await run();
+  } finally {
+    if (spinner.parentNode) spinner.parentNode.removeChild(spinner);
+    button.disabled = false;
+  }
+}
+
+// Draw one section, and let it fail alone.
+//
+// WHY: this page is one long function that assigns innerHTML section by
+// section. An exception anywhere in it unwinds the rest, so every section
+// BELOW the broken one silently draws nothing -- and that is not what a bug
+// looks like, that is what an empty system looks like. A day with no prior
+// conversations blanked the receipts, the world count and the whole vocabulary
+// at once, and read as though neuron had forgotten everything it could do.
+//
+// Now a section that cannot be drawn says so, in its own place, and the
+// sections after it draw normally.
+function draw(id, build) {
+  try {
+    $(id).innerHTML = build();
+  } catch (e) {
+    $(id).innerHTML = '<div class="said bad">This section could not be drawn.'
+      + '\n\n' + (e && e.message ? e.message : String(e))
+      + '\n\nThe rest of the page is unaffected. This is a fault in the '
+      + 'page or in what the server sent it, not in the machine it describes.'
+      + '</div>';
+  }
+}
+
+// The action box says what is happening and then says what happened. The text
+// is REPLACED rather than appended to, so it always reads as the current state
+// of the one thing you pressed -- not a transcript you have to scroll.
+// A notice appears under the section it came from. Everything used to land in
+// one box under "the machine", so opening a chat window reported itself beside
+// the mysql lamp -- which reads as being about mysql.
+// A box the person closed stays closed. The start watch says something every
+// two seconds, and each of those was reopening a box that had just been
+// dismissed -- so the X did nothing that lasted.
+const dismissed = {};
+
+function say(text, kind, where) {
+  const box = where || 'acted';
+  if (dismissed[box]) return;
+  $(box + '-text').textContent = text;
+  $(box + '-text').className = 'said' + (kind ? ' ' + kind : '');
+  $(box).hidden = false;
+}
+
+// After pressing start, watch for the port to come up and rewrite the box.
+// This is what says the MENU did it, rather than something in the background
+// having happened to succeed at the same moment.
+let watching = null;
+
+function watchFor(name, verb) {
+  if (watching) clearInterval(watching);
+  const began = Date.now();
+
+  watching = setInterval(async () => {
+    const state = await (await fetch('/state')).json();
+    const service = state.services.find(s => s.name === name);
+    const seconds = Math.round((Date.now() - began) / 1000);
+
+    if (service && service.up && verb === 'start') {
+      clearInterval(watching); watching = null;
+      say(name + ' started — port ' + service.port + ', pid ' + service.pid
+        + ', ' + seconds + ' seconds.', 'done');
+      refresh();
+    } else if (service && !service.up && verb === 'stop') {
+      clearInterval(watching); watching = null;
+      say(name + ' stopped, ' + seconds + ' seconds.', 'done');
+      refresh();
+    } else if (seconds > 180) {
+      clearInterval(watching); watching = null;
+      say(name + ' still has not come up after three minutes. Press log to see '
+        + 'what it is saying — a server that fails to start says why there and '
+        + 'nowhere else.', 'bad');
+    } else {
+      say(verb === 'start'
+        ? 'Starting ' + name + '… ' + seconds + 's. Press log to watch it.'
+        : 'Stopping ' + name + '… ' + seconds + 's.');
+      refresh();
+    }
+  }, 2000);
+}
+
+async function refresh(probe) {
+  let state;
+  try {
+    state = await (await fetch('/state'
+      + (probe ? '?probe=' + encodeURIComponent(probe) : ''))).json();
+    $('asof').textContent = 'as of ' + new Date().toLocaleTimeString();
+    // Kept for the handlers that need a fact from the last answer without
+    // asking for a new one -- which path the picker opens on, which model a
+    // dialog is talking about. It was being assigned in the CATCH, where
+    // `state` is undefined by definition, so it stayed {} forever and the
+    // deployment picker always opened blank.
+    lastState = state;
+  } catch (e) {
+  draw('whereabouts', () =>
+    '<span class="override">The menu server '
+      + 'stopped answering. It was started from a terminal; look there.</span>');
+    return;
+  }
+
+  // The path is a BUTTON and the profiles are chips. Both had handlers all
+  // along -- `pick-deployment` and `data-profile` -- and this render had been
+  // flattened to plain text, so there was nothing on the page to press. Pure
+  // markup regression: the machinery underneath never stopped working.
+  // ONE button per thing, not one per option.
+  //
+  // Four profile chips in a row read as four things you might press, when
+  // three of them do the same thing to a different value and only one is
+  // true. A single button showing what IS true, opening a panel of what could
+  // be, says which of those two questions you are answering.
+  draw('whereabouts', () =>
+    'deployment <b>' + state.deployment + '</b>'
+    + '<span style="margin-left:14px">profile</span> '
+    + '<button class="quiet chosen" id="pick-profile"'
+    + (state.profile ? '' : ' disabled') + '>'
+    + (state.profile || 'none') + '</button>'
+    + (state.overridden
+        ? ' <span class="override">(overridden in neuron’s config)</span>'
+        : ''));
+
+  // --- the machine
+  // A service has THREE states, and leaving the middle one out is why the
+  // start button flickered: a worldserver spends half a minute loading vmaps
+  // before it binds a port, and through all of it "does something hold the
+  // port" answers no. Start came back enabled, and pressing it again launched a
+  // second one.
+  draw('services', () =>
+    state.services.map(s => `
+    <div class="row">
+      <!-- A spinner while it is coming up, because a half-circle is a state
+           and starting is a PROCESS. The difference matters at exactly the
+           moment somebody is deciding whether to wait or to go and look at the
+           log. -->
+      <div class="lamp ${s.up ? 'on' : (s.starting ? 'warn' : 'off')}">${
+        s.up ? '●' : (s.starting ? '<span class="spinner warm"></span>' : '○')}</div>
+      <div>
+        <div class="name">${s.name}<span class="port">port ${s.port}${
+          s.up ? ' — pid ' + s.pid
+               : (s.starting ? ' — starting, pid ' + s.pid : '')}</span></div>
+      </div>
+      <div class="buttons">
+        <button ${(s.up || s.starting || (s.requires_up || []).some(
+                    b => !(state.services.find(x => x.name === b) || {}).up)
+                  ) ? 'disabled' : ''}
+                data-act="start" data-name="${s.name}"
+                title="${s.starting ? 'already starting'
+                  : ((s.requires_up || []).some(
+                    b => !(state.services.find(x => x.name === b) || {}).up)
+                  ? 'needs ' + s.requires_up.join(' and ') + ' running first' : '')}"
+        >start</button>
+        <!-- Stoppable WHILE STARTING, and that is the point of the third
+             state. A start you regret used to need a terminal, because stop
+             was greyed out until the port came up. -->
+        <button class="quiet" ${((!s.up && !s.starting) || !s.stoppable) ? 'disabled' : ''}
+                data-act="stop" data-name="${s.name}"
+                ${(s.requires_down || []).filter(
+                    b => (state.services.find(x => x.name === b) || {}).up
+                  ).length ? 'data-blockedby="' + (s.requires_down || []).filter(
+                    b => (state.services.find(x => x.name === b) || {}).up
+                  ).join(',') + '"' : ''}
+                title="${s.stop_why || ''}">stop</button>
+        <button class="quiet" ${s.has_log ? '' : 'disabled'}
+                data-log="${s.name}"
+                title="${s.has_log ? ''
+                  : 'not started from here, and its config names no log file'}"
+        >log</button>
+      </div>
+    </div>`).join(''));
+
+  // --- asking: values, not a paragraph
+  const m = state.model;
+  const key = (state.keys || []).find(k => k.name === 'api.key') || {};
+  const ollama = state.services.find(s => s.name === 'ollama');
+
+  // Fold this draw's answers into what is already known, in both directions:
+  // a fresh result is remembered, and a row this request said nothing about
+  // gets its earlier answer back rather than being drawn as unasked.
+  if (m.checked) {
+    remember('configured', m.url, m.model, m.answering);
+  } else {
+    const was = recall('configured', m.url, m.model);
+    if (was) { m.checked = true; m.answering = was.answering; m.unchecked = false; }
+  }
+
+
+  draw('asking', () =>
+    `
+    <h3 class="sub ruled">the game master &mdash; runs the world</h3>
+    <div class="row">
+      <!-- A check outranks the configuration. "Configured and a key is
+           present" is a guess about whether this works; "it answered four
+           seconds ago" is not. -->
+      <div class="lamp ${m.checked ? (m.answering ? 'on' : 'off')
+          : (m.unchecked ? '' : (m.usable
+              ? (m.which === 'bench' ? 'warn' : 'on') : 'off'))}">${
+        m.checked ? (m.answering ? '\u25cf' : '\u25cb')
+          : (m.unchecked ? '\u25cc' : (m.usable ? '\u25cf' : '\u25cb'))}</div>
+      <div>
+        <div class="name">${m.model || 'none'}<span class="port">${
+          m.checked ? (m.answering ? 'answering' : 'not answering')
+                    : 'not checked'}</span></div>
+        <div class="what">${m.url || ''}</div>
+      </div>
+      <div class="buttons"><button class="quiet"
+        data-check="configured">validate</button></div>
+    </div>
+    <!-- The key belongs to the model it is sent to, and it used to be in two
+         places at once: here and again under "keys". Two rows about one file,
+         either of which could be the one somebody acted on. -->
+    <div class="row">
+      <div class="lamp ${key.present ? 'on' : 'off'}">${
+        key.present ? '\u25cf' : '\u25cb'}</div>
+      <div>
+        <div class="name">api.key<span class="port">${
+          key.present ? 'present' : 'missing'}</span></div>
+        <div class="what">${key.path || ''}</div>
+        <div class="what">A local model won't need this.</div>
+        ${key.present ? '' : `
+          <div class="keyline">
+            <input id="key-api.key" type="password" autocomplete="off"
+                   placeholder="paste the credential — nothing else">
+            <button data-key="api.key">write it</button>
+          </div>`}
+      </div>
+      <div class="buttons">
+        <button class="quiet" ${key.present ? '' : 'disabled'}
+                data-key="api.key" data-clear="1">delete</button>
+      </div>
+    </div>
+
+    <!-- A SEPARATE heading, because these are two unrelated services and
+         putting them in one list read as though claude-opus-5 somehow ran on
+         llama3.2. Nothing here is sent anywhere near the row above. -->
+    <h3 class="sub">the configuration assistant &mdash; sets neuron up</h3>
+    <div class="note" style="border-bottom:1px solid #1c1c22;padding-bottom:10px">
+      Needs no credential. Nothing it is told leaves this network.
+      <a href="/guide" target="_blank">How to set one up</a>.</div>
+    ${state.bench ? `
+    <!-- The lamp comes from the SERVICE row above, not from a probe. ollama is
+         started and stopped like the other three now, so "is it running" is
+         answered the same way theirs is: something holds the port, or it does
+         not. A separate check button asking the same question a different way
+         was a second answer that could disagree with the first. -->
+    <div class="row">
+      <div class="lamp ${ollama && ollama.up ? 'on'
+          : (ollama && ollama.starting ? 'warn' : 'off')}">${
+        ollama && ollama.up ? '\u25cf'
+          : (ollama && ollama.starting ? '\u25d0' : '\u25cb')}</div>
+      <div><div class="name">${state.bench.model}<span class="port">${
+        ollama && ollama.up ? 'running'
+          : (ollama && ollama.starting ? 'starting'
+             : 'not running — start it under services')}</span></div></div>
+      <div class="buttons">
+        <button class="quiet" id="pick-bench">change</button>
+      </div>
+    </div>
+    <!-- Address, port and path as three rows: three separate answers, and
+         only one of them is usually wrong. Each opens the same form, which is
+         also where the model, the wire format and the timeout live. -->
+    <div class="row">
+      <div class="lamp"></div>
+      <div>
+        <div class="name">address<span class="port">${
+          state.asking_targets.bench.scheme}</span></div>
+        <div class="what">${state.asking_targets.bench.host || '—'}</div>
+      </div>
+      <div class="buttons">
+        <button class="quiet" data-asking="bench">change</button>
+      </div>
+    </div>
+    <div class="row">
+      <div class="lamp"></div>
+      <div>
+        <div class="name">port</div>
+        <div class="what">${state.asking_targets.bench.port
+          || "the protocol's own"}</div>
+      </div>
+      <div class="buttons">
+        <button class="quiet" data-asking="bench">change</button>
+      </div>
+    </div>
+    <div class="row">
+      <div class="lamp"></div>
+      <div>
+        <div class="name">path<span class="port">${
+          state.asking_targets.bench.dialect} format</span></div>
+        <div class="what">${state.asking_targets.bench.path}</div>
+      </div>
+      <div class="buttons">
+        <button class="quiet" data-asking="bench">change</button>
+      </div>
+    </div>
+    <div id="bench-list"></div>`
+    : '<div class="note">config/asking.lua describes no local model.</div>'}`);
+
+  // --- conversations
+  // Every one, whether or not anything is "running" -- because nothing is. A
+  // conversation is a transcript; opening it is reading that file back. So the
+  // list is the same whether it was begun a minute ago or last week.
+  draw('chats', () =>
+    `
+    <div class="buttons" style="padding-bottom:10px">
+      <button data-act="chat">new conversation (game master)</button>
+      <button class="quiet" data-act="admin">new conversation (configuration assistant)</button>
+    </div>
+`);
+
+  // Only redraw when the list is different. Rewriting this closes every open
+  // transcript, and the list changes about once a conversation.
+  const signature = (state.conversations || []).map(c => c.id + c.turns).join();
+  if (signature !== lastConversations) {
+    lastConversations = signature;
+    draw('past', () =>
+    state.conversations.length ? `
+    <details ${pastOpen ? 'open' : ''} id="past-details"
+             ontoggle="pastOpen = this.open">
+      <summary>${state.conversations.length} prior log${
+        state.conversations.length === 1 ? '' : 's'}</summary>
+      ${state.conversations.map(c => `
+        <div class="row" style="grid-template-columns:1fr auto;padding:6px 0;
+             display:block">
+          <div style="display:flex;gap:10px;align-items:baseline">
+            <a href="#" data-conv="${c.id}" style="flex:1">${
+              (c.asked && c.asked.trim()) ? c.asked : '(no opening line)'}</a>
+            <span class="port">${c.turns} said &middot; ${c.calls} called</span>
+          </div>
+          <pre class="log" id="conv-${c.id.replace(/[^\w]/g, '_')}"
+               hidden style="resize:both;overflow:auto;max-height:none;
+               height:260px;white-space:pre-wrap;overflow-wrap:anywhere;
+               max-width:82ch"></pre>
+          <div class="buttons" id="cont-${c.id.replace(/[^\w]/g, '_')}"
+               hidden style="padding:6px 0 2px">
+            <button class="quiet" data-continue="${c.id}">continue conversation</button>
+          </div>
+        </div>`).join('')}
+    </details>` : '');
+  }
+
+  // --- the deployment
+  //
+  // Every row says where its value came from. Almost all of them are read out
+  // of the server's own configuration, which is the whole reason a stock
+  // AzerothCore can be driven at all: neuron and the server agree because they
+  // are reading the same line of the same file, rather than because neuron
+  // guessed the same convention.
+  const dep = state.deployment_facts;
+
+  // {{{ lamp(state)
+  // Three answers, not two. A file that is there and is not what it claims to
+  // be is a different problem from one that is missing, and it is the one that
+  // wastes an afternoon -- the setting looks right and nothing works.
+  const lamp = state => ({
+    good:      '<div class="lamp on">\u25cf</div>',
+    malformed: '<div class="lamp warn">\u25d0</div>',
+  })[state] || '<div class="lamp off">\u25cb</div>';
+  // }}}
+
+  draw('deployment', () => `
+    <div class="row">
+      ${lamp(dep.root_state)}
+      <div>
+        <div class="name">data directory<span class="port">where AzerothCore
+          is compiled</span></div>
+        <div class="what">${dep.root}</div>
+      </div>
+      <div class="buttons">
+        <button class="quiet" id="pick-deployment">change</button>
+      </div>
+    </div>
+
+    ${dep.config_files.map(f => `
+    <div class="row">
+      ${lamp(f.state)}
+      <div>
+        <div class="name">${f.name}<span class="port">${
+          f.state === 'malformed' ? 'found, and not a server config'
+            : (f.set ? 'you set this' : 'detected')}</span></div>
+        <div class="what">${f.path}</div>
+      </div>
+      <div class="buttons">
+        <button class="quiet" data-edit-file="${f.key}"
+                data-name="${f.name}" data-value="${f.path}">change</button>
+      </div>
+    </div>`).join('')}
+
+    <div class="row">
+      ${lamp(dep.mysql_client_state)}
+      <div>
+        <div class="name">database client<span class="port">${
+          dep.mysql_client_set ? 'you set this' : 'detected'}</span></div>
+        <div class="what">${dep.mysql_client}</div>
+      </div>
+      <div class="buttons">
+        <button class="quiet" id="find-mysql">detect</button>
+        <button class="quiet" data-edit="mysql_client"
+                data-value="${dep.mysql_client}">change</button>
+      </div>
+    </div>
+    <div id="mysql-found"></div>
+
+    <!-- The account name and whether its password is set are BEHIND the
+         change button. They are the two things on this page somebody might
+         not want on screen, and neither is needed to know the row is
+         healthy -- the lamp says that. -->
+    <div class="row">
+      <!-- Amber when only half of it is here. A name with no password
+           authenticates nothing, and green would say the row is done. -->
+      ${lamp(dep.soap_key_present && dep.soap_account ? 'good'
+             : (dep.soap_account || dep.soap_key_present ? 'malformed'
+                                                        : 'missing'))}
+      <div>
+        <div class="name">game master account</div>
+        <div class="what">A game account with game-master rights.</div>
+      </div>
+      <div class="buttons">
+        <button class="quiet" id="check-account">validate</button>
+        <button class="quiet" id="edit-account">change</button>
+      </div>
+    </div>
+
+    <div class="panel" id="account-editor" hidden>
+      <button class="shut" data-shut="account-editor">&times;</button>
+      <div class="note">Create it in the worldserver console first:</div>
+      <pre class="console">account create neuron a-password
+account set gmlevel neuron 3 -1</pre>
+      <div class="keyline">
+        <label for="account-name">username</label>
+        <input id="account-name" autocomplete="off"
+               value="${dep.soap_account || ''}">
+      </div>
+      <div class="keyline">
+        <label for="account-password">password</label>
+        <input id="account-password" type="password" autocomplete="off"
+               placeholder="${dep.soap_key_present
+                 ? 'leave blank to keep the one already set' : ''}">
+        <button id="account-use">use this</button>
+      </div>
+    </div>
+
+    <div class="panel" id="value-editor" hidden>
+      <button class="shut" data-shut="value-editor">&times;</button>
+      <div class="note" id="value-editor-note"></div>
+      <div class="keyline">
+        <input id="value-editor-input" autocomplete="off">
+        <button id="value-editor-use">use this</button>
+        <button class="quiet" id="value-editor-detect">detect</button>
+      </div>
+    </div>`);
+
+  // --- receipts
+  //
+  // Hidden until there is one, and the paragraph explaining what a receipt is
+  // went with it. Most of the time this section said "nothing yet today"
+  // followed by an explanation of a thing that had not happened.
+  //
+  // It is not the conversation log said twice. A conversation records what was
+  // SAID; a receipt records what was DONE and carries the values that were
+  // there before, which is the only reason character.return can exist. One is
+  // a story, the other is an undo.
+  $('receipts-heading').hidden = state.receipts.length === 0;
+  $('receipts').hidden = state.receipts.length === 0;
+
+  draw('receipts', () =>
+    state.receipts.length ? state.receipts.map(r => `
+    <div class="row">
+      <div class="lamp ${r.outcome === 'complete' ? 'on' : 'off'}">${
+        r.outcome === 'complete' ? '●' : '○'}</div>
+      <div>
+        <div class="name">${r.operation}<span class="port">${r.when} — ${
+          r.steps} step${r.steps === 1 ? '' : 's'} — ${r.outcome}</span></div>
+      </div>
+      <div class="buttons">
+        <button class="quiet" ${r.undoable ? '' : 'disabled'}
+          title="${r.undoable ? 'Put it back' : 'This one wrote down what it destroyed and cannot restore it'}"
+          data-act="undo" data-name="${r.id}">undo</button>
+      </div>
+    </div>`).join('') : '');
+
+  // --- the world
+  //
+  // Hidden entirely when the database did not answer. A row saying "nothing to
+  // count, because the database did not answer" is a second place to learn
+  // something the mysql lamp already said, phrased as though the world were
+  // empty rather than unreachable.
+  const w = state.world;
+  $('world-heading').hidden = !w.readable;
+  $('world').hidden = !w.readable;
+
+  draw('world', () =>
+    w.readable ? `
+    <div class="row"><div class="lamp ${w.players > 0 ? 'on' : 'off'}">${
+      w.players > 0 ? '●' : '○'}</div><div>
+      <div class="name">${w.players} player${w.players === 1 ? '' : 's'} online<span
+        class="port">${w.bots_online} bot${w.bots_online === 1 ? '' : 's'} online</span></div>
+    </div><div></div></div>`
+   : `<div class="row"><div class="lamp off">○</div><div>
+        <div class="name">nothing to count</div>
+        <div class="what">${w.why}</div></div><div></div></div>`);
+
+}
+
+document.addEventListener('click', async event => {
+  const target = event.target;
+
+  if (target.id === 'log-shut') { closeLog(); return; }
+  if (target.dataset.shut) {
+    $(target.dataset.shut).hidden = true;
+    dismissed[target.dataset.shut] = true;
+    return;
+  }
+
+  if (target.dataset.key) {
+    const clearing = target.dataset.clear === '1';
+
+    // Clearing asks twice, in the button itself.
+    //
+    // Deleting a credential is not undoable and not recoverable -- the file is
+    // the only copy, and the thing it holds usually came from somewhere that
+    // will not show it again. A dialog would be heavier than this deserves; a
+    // button that changes colour and asks is exactly as much friction as one
+    // extra deliberate click.
+    //
+    // The armed state lives on the button rather than in a variable, so a
+    // redraw disarms it -- which is right: the page has changed underneath the
+    // question you were being asked.
+    if (clearing && target.dataset.armed !== '1') {
+      target.dataset.armed = '1';
+      target.dataset.was = target.textContent;
+      target.textContent = 'are you sure?';
+      target.classList.add('danger');
+
+      // Disarms itself. A button left saying "are you sure?" across a room and
+      // back is a button somebody clicks without reading.
+      setTimeout(() => {
+        if (target.dataset.armed !== '1') return;
+        target.dataset.armed = '0';
+        target.textContent = target.dataset.was || 'delete';
+        target.classList.remove('danger');
+      }, 5000);
+      return;
+    }
+
+    if (clearing) {
+      target.dataset.armed = '0';
+      target.classList.remove('danger');
+      target.textContent = target.dataset.was || 'delete';
+    }
+
+    const box = document.getElementById('key-' + target.dataset.key);
+    const answer = await (await fetch('/key', { method: 'POST',
+      body: JSON.stringify({ name: target.dataset.key, clear: clearing,
+                             value: box ? box.value : '' })
+    })).json();
+    if (box) box.value = '';
+    say(answer.text, answer.ok ? 'done' : 'bad', 'acted-asking');
+    setTimeout(refresh, 400);
+    return;
+  }
+
+  if (target.dataset.act === 'stop' && target.dataset.blockedby) {
+    const blockers = target.dataset.blockedby.split(',');
+    const name = target.dataset.name;
+    ask('stop ' + name,
+        'The worldserver holds the world in memory and writes it to this '
+      + 'database. Taking the database away underneath it is how a world gets '
+      + 'corrupted, so ' + blockers.join(' and ') + ' must stop first. '
+      + 'Press ok to do that, in order.',
+        () => cascade(name, blockers));
+    return;
+  }
+
+  // --- starting one
+  if (target.dataset.act === 'chat' || target.dataset.act === 'admin') {
+    const answer = await (await fetch('/conversation/new', { method: 'POST',
+      body: JSON.stringify({ vocabulary:
+        target.dataset.act === 'admin' ? 'asking' : 'world' })
+    })).json();
+    window.open('/chat?id=' + encodeURIComponent(answer.id), '_blank');
+    setTimeout(refresh, 500);
+    return;
+  }
+
+  if (target.dataset.act) {
+    const act = target.dataset.act;
+    // Pressing a button is asking to be told again.
+    dismissed['acted'] = false; dismissed['acted-chats'] = false;
+    target.disabled = true;
+    const answer = await (await fetch('/act', { method: 'POST',
+      body: JSON.stringify({ what: target.dataset.act, name: target.dataset.name })
+    })).json();
+
+    // Which section this belongs under: the chat buttons report beside the
+    // windows, everything else beside the machine.
+    const where = (act === 'chat' || act === 'admin' || act === 'close')
+      ? 'acted-chats' : 'acted';
+
+    say(answer.text, answer.ok ? null : 'bad', where);
+
+    // A service takes a while to hold its port, so watch for it rather than
+    // guessing at a delay. Everything else settles immediately.
+    if (answer.ok && (act === 'start' || act === 'stop')
+        && target.dataset.name && !target.dataset.name.match(/^\d+$/)) {
+      watchFor(target.dataset.name, act);
+    } else {
+      setTimeout(refresh, 800);
+      setTimeout(refresh, 3000);
+    }
+  }
+
+  if (target.dataset.log) {
+    // Pressing the same log again closes it. Pressing a different one switches.
+    if (showingLog === target.dataset.log) { closeLog(); }
+    else { openLog(target.dataset.log); }
+  }
+
+  // --- reading one, in place, as many at once as you like
+  if (target.dataset.conv) {
+    event.preventDefault();
+    const box = $('conv-' + target.dataset.conv.replace(/[^\w]/g, '_'));
+    if (!box) return;
+
+    const cont = $('cont-' + target.dataset.conv.replace(/[^\w]/g, '_'));
+
+    if (!box.hidden) { box.hidden = true; if (cont) cont.hidden = true; return; }
+
+    // `said=1`: what people said, and nothing else. No system prompt, no
+    // tool results. Somebody opening last week's conversation from a list came
+    // for the conversation.
+    box.textContent = await (await fetch('/conversation/text?said=1&id='
+      + encodeURIComponent(target.dataset.conv))).text();
+    box.hidden = false;
+    if (cont) cont.hidden = false;
+    return;
+  }
+
+  // --- picking it back up
+  if (target.dataset.continue) {
+    const id = target.dataset.continue;
+    const text = await (await fetch('/conversation/text?id='
+      + encodeURIComponent(id))).text();
+    const levers = (text.match(/levers\s+(\w+)/) || [])[1] || 'world';
+    const model = lastState.model || {};
+
+    ask('continue this conversation',
+        'Which model should pick it up? A conversation carries its own '
+      + 'instructions and its own levers (' + levers + '); only who answers is '
+      + 'being chosen here.',
+        null);
+
+    $('dialog-steps').innerHTML =
+        '<div style="padding:4px 0"><b>remote</b> &mdash; '
+      + (model.which === 'none' ? 'not available' : model.model || '?')
+      + '<br><span style="color:var(--dim)">the configured service, at cost, '
+      + 'and much more capable</span></div>'
+      + '<div style="padding:8px 0"><b>local</b> &mdash; llama3.2:latest'
+      + '<br><span style="color:var(--dim)">on this machine, free, and small'
+      + '</span></div>';
+
+    $('dialog-ok').textContent = 'remote';
+    $('dialog-no').textContent = 'local';
+    $('dialog-close').hidden = false;
+    $('dialog-close').textContent = '\u2715';
+    $('dialog-close').style.color = 'var(--down)';
+
+    const go = which => () => {
+      shutDialog();
+      $('dialog-ok').textContent = 'ok';
+      $('dialog-no').textContent = 'cancel';
+      $('dialog-close').textContent = 'close';
+      $('dialog-close').style.color = '';
+      window.open('/chat?id=' + encodeURIComponent(id)
+        + '&model=' + which, '_blank');
+    };
+
+    $('dialog-ok').onclick = go('remote');
+    $('dialog-no').onclick = go('local');
+    return;
+  }
+
+  if (target.dataset.doc) {
+    event.preventDefault();
+    const text = await (await fetch('/doc?name='
+      + encodeURIComponent(target.dataset.doc))).text();
+    $('doc').textContent = text;
+    $('doc').hidden = false;
+    $('doc').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+});
+
+// --- logs, which follow rather than sit still --------------------------------
+// A log that only updates when you switch away and back is a log that lies
+// about what is happening right now, which is the one thing you opened it for.
+
+let showingLog = null;
+let lastState = {};
+let showingConversation = null;
+let pastOpen = false;
+let lastConversations = null;
+
+// What a check found, kept between draws.
+//
+// A check asks about ONE endpoint, so the answer that comes back describes one
+// and says nothing about the other -- and the other's row was being redrawn
+// from that silence as "nobody has asked". Pressing check beside ollama made
+// the anthropic row forget it had ever been checked, and the reverse.
+//
+// A check is an answer about a specific url and model. It stays an answer until
+// one of those changes, which is exactly when it stops being true. If the
+// endpoint goes down in between, that shows up the next time somebody checks --
+// which is when they will be looking, because something else stopped working.
+const checked = { configured: null, bench: null };
+
+// {{{ remember(which, url, model, answering)
+function remember(which, url, model, answering) {
+  checked[which] = { url: url, model: model, answering: answering };
+}
+// }}}
+
+// {{{ recall(which, url, model)
+// The remembered answer, but only if it is about this url and this model.
+function recall(which, url, model) {
+  const was = checked[which];
+  if (!was) return null;
+  if (was.url !== url || was.model !== model) { checked[which] = null; return null; }
+  return was;
+}
+// }}}
+let logTimer = null;
+
+async function drawLog() {
+  if (!showingLog) return;
+  const text = await (await fetch('/log?service=' + showingLog)).text();
+
+  // Only redraw when it actually changed. Rewriting innerHTML twice a second
+  // fights with selecting text, and half the point of a log is copying a line
+  // out of it.
+  if ($('log').innerHTML !== text) {
+    const pinned = $('log').scrollTop + $('log').clientHeight
+                   >= $('log').scrollHeight - 30;
+    // innerHTML, because the server escaped the text and turned the terminal's
+    // colour codes into spans. Red is errors and yellow is warnings, which is
+    // exactly what somebody scanning a startup log is looking for.
+    $('log').innerHTML = text;
+    if (pinned) $('log').scrollTop = $('log').scrollHeight;
+  }
+}
+
+function openLog(name) {
+  showingLog = name;
+  $('log-panel').hidden = false;
+  $('log-title').textContent = name;
+
+  // Only a server with a reachable console gets a box to type in. One that
+  // cannot be typed at says why instead -- a text field that silently does
+  // nothing is worse than no field.
+  // A box to type at a server that is not running is a box that can only
+  // disappoint. Shown when the service both HAS a console and is up.
+  const service = (lastState.services || []).find(s => s.name === name) || {};
+  const canType = !!service.console && service.up;
+
+  $('console-line').hidden = !canType;
+  $('console-why').hidden = canType;
+  // Only the reason a service can never be typed at -- mysqld, which speaks a
+  // protocol rather than reading standard input. "not running, so there is
+  // nothing to type at" said nothing the absent box did not already say.
+  $('console-why').textContent = service.console ? '' : (service.console_why || '');
+  drawLog();
+  if (logTimer) clearInterval(logTimer);
+  logTimer = setInterval(drawLog, 500);
+}
+
+function closeLog() {
+  showingLog = null;
+  if (logTimer) { clearInterval(logTimer); logTimer = null; }
+  $('log-panel').hidden = true;
+}
+
+// --- the ordered shutdown ----------------------------------------------------
+// Stopping the database with the worldserver still attached is how a world gets
+// corrupted. Rather than a greyed-out button that explains nothing, the page
+// says what has to happen first and then does it, in order, showing each one.
+
+// Cancel always closes, whatever else is going on. A dialog whose buttons only
+// work once something has configured them is a dialog that can trap the page.
+function shutDialog() {
+  $('veil').hidden = true;
+  $('veil').classList.remove('going');
+  $('dialog-log').hidden = true;
+  $('dialog-close').hidden = true;
+  refresh();
+}
+
+function ask(title, body, onYes) {
+  $('dialog-title').textContent = title;
+  $('dialog-body').textContent = body;
+  $('dialog-steps').innerHTML = '';
+  $('dialog-ok').hidden = false;
+  $('dialog-no').hidden = false;
+  $('veil').hidden = false;
+  $('veil').classList.remove('going');
+  $('dialog-ok').onclick = onYes;
+  $('dialog-no').onclick = shutDialog;
+}
+
+function step(html) {
+  $('dialog-steps').innerHTML += html + '\n';
+}
+
+async function isUp(name) {
+  const state = await (await fetch('/state')).json();
+  const service = state.services.find(s => s.name === name);
+  return service && service.up;
+}
+
+// Keeps asking until it is actually down. A stop is a request, not a fact --
+// the worldserver saves before it goes, and that takes as long as it takes.
+async function stopAndWait(name) {
+  const line = document.createElement('div');
+  line.innerHTML = '<span class="spinner"></span>stopping ' + name + '…';
+  $('dialog-steps').appendChild(line);
+
+  // Show what it is saying while it goes. A shutdown that takes a minute is
+  // either saving or stuck, and the only place that difference is visible is
+  // the log.
+  $('dialog-log').hidden = false;
+  const following = setInterval(async () => {
+    $('dialog-log').innerHTML =
+      await (await fetch('/log?service=' + name)).text();
+    $('dialog-log').scrollTop = $('dialog-log').scrollHeight;
+  }, 700);
+
+  await fetch('/act', { method: 'POST',
+    body: JSON.stringify({ what: 'stop', name: name }) });
+
+  for (let tries = 0; tries < 120; tries++) {
+    if (!await isUp(name)) {
+      clearInterval(following);
+      line.innerHTML = '<span class="done">' + name + ' stopped</span>';
+      refresh();
+      return true;
+    }
+    // ASKED ONCE. Nothing is nudged.
+    //
+    // It used to re-send the stop every ten seconds, on the reasoning that a
+    // signal can be missed while a server is busy and asking twice costs
+    // nothing. For a signal that is true. For the worldserver it was a
+    // livelock: "server shutdown N" does not stack, it RESTARTS the countdown,
+    // so every nudge put the timer back to the top. The log read
+    //
+    //     Server shutdown in 30 second(s).
+    //     Server shutdown in 20 second(s).
+    //     Server shutdown in 30 second(s).
+    //     Server shutdown in 20 second(s).
+    //
+    // forever -- counting 30, 20, then being reset at ten seconds, over and
+    // over. It only finished when the person stopped watching and the dialog's
+    // two-minute budget ran out, letting one countdown reach zero. The thing
+    // meant to make stopping more reliable was the only reason it never
+    // stopped.
+    if (tries === 40) {
+      line.innerHTML = '<span class="spinner"></span>stopping ' + name
+        + '… still going. It saves before it exits, and a large world takes '
+        + 'a while.';
+    }
+    await new Promise(r => setTimeout(r, 500));
+  }
+
+  clearInterval(following);
+  line.innerHTML = '<span class="fail">' + name
+    + ' would not stop after a minute — its log is below</span>';
+  return false;
+}
+
+async function cascade(name, alsoStop) {
+  $('dialog-ok').hidden = true;
+  $('dialog-no').hidden = true;
+  // Always closable. A dialog that only leaves when everything succeeded is a
+  // dialog you have to reload the page to escape -- which is exactly what
+  // happened when a shutdown stalled.
+  $('dialog-close').hidden = false;
+  $('dialog-body').textContent = '';
+
+  for (const first of alsoStop) {
+    if (!await stopAndWait(first)) return;
+  }
+  if (!await stopAndWait(name)) return;
+
+  step('<span class="done">' + name + ' successfully stopped</span>');
+  refresh();
+
+  setTimeout(() => {
+    $('veil').classList.add('going');
+    setTimeout(() => { $('veil').hidden = true; refresh(); }, 500);
+  }, 1200);
+}
+
+// {{{ switchProfile(wanted)
+async function switchProfile(wanted) {
+  const answer = await (await fetch('/profiles', { method: 'POST',
+    body: JSON.stringify({ profile: wanted }) })).json();
+  say(answer.text, answer.ok ? 'done' : 'bad');
+  await refresh();
+  return answer.ok;
+}
+// }}}
+
+// {{{ stopThenSwitch(running, wanted)
+// Stop what is running, in the order that is safe, then switch.
+//
+// The order matters and it is the reverse of starting: the worldserver holds
+// the world in memory and writes it to the database, so the database goes last.
+// `stopAndWait` already knows how to stop one and wait for the port to clear;
+// this walks the list the same way `cascade` does.
+async function stopThenSwitch(running, wanted) {
+  $('dialog-ok').hidden = true;
+  $('dialog-no').hidden = true;
+  $('dialog-close').hidden = false;
+  $('dialog-body').textContent = '';
+
+  $('profile-veil').hidden = true;
+
+  const order = ['worldserver', 'authserver', 'mysql']
+    .filter(name => running.indexOf(name) >= 0);
+
+  for (const name of order) {
+    if (!await stopAndWait(name)) return;
+  }
+
+  if (!await switchProfile(wanted)) {
+    step('<span class="fail">the switch itself was refused</span>');
+    return;
+  }
+
+  step('<span class="done">now on ' + wanted + '</span>');
+
+  setTimeout(() => {
+    $('veil').classList.add('going');
+    setTimeout(() => { $('veil').hidden = true; refresh(); }, 500);
+  }, 1200);
+}
+// }}}
+
+// Wired at load, so they work before any dialog has been raised -- and pressing
+// escape closes it too, because a modal with no way out is worse than no modal.
+$('dialog-no').onclick = shutDialog;
+$('dialog-ok').onclick = shutDialog;
+$('dialog-close').onclick = shutDialog;
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && !$('asking-veil').hidden) {
+    $('asking-veil').hidden = true;
+    return;
+  }
+  if (e.key === 'Escape' && !$('config-veil').hidden) {
+    $('config-veil').hidden = true;
+    return;
+  }
+  if (e.key === 'Escape' && !$('profile-veil').hidden) {
+    $('profile-veil').hidden = true;
+    return;
+  }
+  if (e.key === 'Escape' && !$('library-veil').hidden) {
+    $('library-veil').hidden = true;
+    return;
+  }
+  if (e.key === 'Escape' && !$('veil').hidden) shutDialog();
+});
+
+// --- typing at a server ------------------------------------------------------
+async function sendConsole() {
+  const box = $('console');
+  const command = box.value.trim();
+  // An empty line is not sent. There is nothing a blank command means to a
+  // game master console, so this is a keypress that costs nothing rather than
+  // a round trip that comes back saying "nothing was typed".
+  if (!command || !showingLog) return;
+
+  box.value = '';
+  const answer = await (await fetch('/say', { method: 'POST',
+    body: JSON.stringify({ name: showingLog, command: command }) })).json();
+
+  say('.' + command + '\n\n' + answer.text, answer.ok ? 'done' : 'bad');
+  drawLog();
+}
+
+$('console-send').onclick = sendConsole;
+$('console').addEventListener('keydown', e => {
+  if (e.key === 'Enter') sendConsole();
+});
+
+// --- pointing at a deployment ------------------------------------------------
+// A typed path, not a listing.
+//
+// The server walking directories meant sending a picture of this disk to
+// whoever opened the page -- and the page can be opened from another machine.
+// Typing a path sends one string, and the server checks it against the three
+// things every deployment has before changing anything.
+
+document.addEventListener('click', async event => {
+  // A dotted lamp means nobody has asked. These two ask.
+  // Refresh asks about EVERYTHING, the two endpoints included. It is the one
+  // button whose whole job is "tell me what is true now", and leaving the two
+  // rows it cannot answer for as dotted would make the word a half-truth.
+  // {{{ the hamburger
+  if (event.target.id === 'hamburger') {
+    const menu = $('hamburger-menu');
+    if (!menu.hidden) { menu.hidden = true; return; }
+
+    // Anchored under the button rather than positioned in the stylesheet, so
+    // it stays put when the button moves -- which it does, because the button
+    // sits in a floated row whose width depends on the refresh timestamp.
+    const at = event.target.getBoundingClientRect();
+    menu.style.top  = (at.bottom + window.scrollY + 6) + 'px';
+    menu.style.left = (at.left + window.scrollX) + 'px';
+    menu.hidden = false;
+    return;
+  }
+
+  // Anywhere else closes it. A menu that needs its own button pressed again to
+  // go away is a menu you close by accident and then cannot get rid of.
+  if (!$('hamburger-menu').hidden && event.target.id !== 'hamburger') {
+    $('hamburger-menu').hidden = true;
+  }
+  // }}}
+
+  // {{{ the library
+  if (event.target.id === 'library-open'
+      || event.target.id === 'footer-library') {
+    event.preventDefault();
+    await working(event.target, async () => {
+      const answer = await (await fetch('/library')).json();
+
+      // Collapsible, all closed on arrival, and each remembers whether it was
+      // open. Remembered in localStorage rather than in a variable, so it
+      // survives a reload -- the state of a reference drawer is a preference,
+      // and a preference that resets is not one.
+      //
+      // Wrapped, because localStorage throws rather than returning null in a
+      // browser set to block site data, and a drawer of headings is not worth
+      // taking the page down for.
+      let opened = {};
+      try { opened = JSON.parse(localStorage.getItem('library-open') || '{}'); }
+      catch (e) { opened = {}; }
+
+      $('library').innerHTML = answer.groups.map((g, index) => `
+        <details ${opened[g.title] ? 'open' : ''} data-group="${g.title}">
+        <summary>${g.title}<span class="count">${g.words.length}</span></summary>
+        <div class="note" style="margin:2px 0 10px">${g.what}</div>
+        ${g.words.length ? g.words.map(o => `
+          <div class="row" style="grid-template-columns:16px 1fr"${
+            o.unavailable ? ' data-off="1"' : ''}>
+            <div class="glyph ${o.kind === 'final' ? 'final' : ''}">${
+              o.unavailable ? '\u2715' : o.glyph}</div>
+            <div>
+              <div class="name">${o.name} <span class="params">${o.params}</span></div>
+              <div class="what">${o.summary}</div>
+              ${o.unavailable
+                ? `<div class="what" style="color:var(--waiting)">${o.unavailable}</div>`
+                : ''}
+            </div>
+          </div>`).join('')
+        : '<div class="note">nothing here yet.</div>'}
+        </details>`).join('')
+        + `<div class="note" style="margin-top:22px">
+             ? reads and changes nothing &nbsp;&middot;&nbsp;
+             + changes the world and can be put back &nbsp;&middot;&nbsp;
+             ~ changes only the conversation &nbsp;&middot;&nbsp;
+             <span style="color:var(--down)">!</span> cannot be undone
+           </div>`;
+
+      // One listener for the whole drawer rather than one per section: the
+      // sections are replaced every time this opens, and a handler attached to
+      // each would be re-attached each time.
+      $('library').addEventListener('toggle', event => {
+        if (event.target.tagName !== 'DETAILS') return;
+        let state = {};
+        try { state = JSON.parse(localStorage.getItem('library-open') || '{}'); }
+        catch (e) { state = {}; }
+        state[event.target.dataset.group] = event.target.open;
+        try { localStorage.setItem('library-open', JSON.stringify(state)); }
+        catch (e) { /* blocked site data; the drawer still works */ }
+      }, true);
+
+      $('library-veil').hidden = false;
+    });
+    return;
+  }
+
+  if (event.target.id === 'library-shut'
+      || event.target.id === 'library-veil') {
+    $('library-veil').hidden = true;
+    return;
+  }
+  // }}}
+
+  if (event.target.id === 'reread') {
+    await working(event.target, () => refresh('all'));
+    return;
+  }
+
+  // Each check asks about ONE endpoint. Both are cheap GETs, but they are
+  // different questions and a single button answering both meant the row you
+  // pressed was not necessarily the row that changed.
+  if (event.target.dataset.check) {
+    await working(event.target, () => refresh(event.target.dataset.check));
+    return;
+  }
+
+  // Which local model answers. Asked of the server itself rather than typed:
+  // a name that is not pulled fails at the first sentence, and by then the
+  // window is open and the person is waiting.
+  // {{{ either model's settings
+  if (event.target.dataset.asking) {
+    const which = event.target.dataset.asking;
+    const target = lastState.asking_targets[which];
+
+    $('asking-veil').dataset.role = which;
+    $('asking-title').textContent = which === 'bench'
+      ? 'the configuration assistant' : 'the game master';
+    $('asking-why').textContent = which === 'bench'
+      ? 'What sets neuron up. It can change nothing in the world, and it is '
+        + 'usually local — but nothing stops it pointing at a hosted service.'
+      : 'What runs the world. Usually hosted and usually the one worth paying '
+        + 'for, but nothing stops it pointing at a local server either.';
+
+    $('asking-scheme').value  = target.scheme;
+    $('asking-host').value    = target.host;
+    $('asking-port').value    = target.port;
+    $('asking-path').value    = target.path;
+    $('asking-model').value   = target.model || '';
+    $('asking-dialect').value = target.dialect;
+    $('asking-timeout').value = target.timeout;
+
+    $('asking-veil').hidden = false;
+    $('asking-host').focus();
+    return;
+  }
+
+  if (event.target.id === 'asking-shut' || event.target.id === 'asking-veil') {
+    $('asking-veil').hidden = true;
+    return;
+  }
+
+  if (event.target.id === 'asking-use') {
+    await working(event.target, async () => {
+      const answer = await (await fetch('/asking', { method: 'POST',
+        body: JSON.stringify({
+          role:    $('asking-veil').dataset.role,
+          scheme:  $('asking-scheme').value,
+          host:    $('asking-host').value.trim(),
+          port:    $('asking-port').value.trim(),
+          path:    $('asking-path').value.trim(),
+          model:   $('asking-model').value.trim(),
+          dialect: $('asking-dialect').value,
+          timeout: $('asking-timeout').value.trim(),
+        })
+      })).json();
+
+      say(answer.text, answer.ok ? 'done' : 'bad', 'acted-asking');
+      if (answer.ok) $('asking-veil').hidden = true;
+      await refresh();
+    });
+    return;
+  }
+  // }}}
+
+  if (event.target.id === 'pick-bench') {
+    const box = $('bench-list');
+    if (box.innerHTML) { box.innerHTML = ''; return; }
+
+    await working(event.target, async () => {
+      const answer = await (await fetch('/bench')).json();
+
+      if (!answer.ok) {
+        box.innerHTML = '<div class="said bad">' + answer.text + '</div>';
+        return;
+      }
+
+      // Tool-capable first and marked. A model with no tool-calling template
+      // does not fail loudly -- it writes prose ABOUT the tools it would
+      // call -- which reads as the whole conversation loop being broken.
+      box.innerHTML = '<div class="note" style="margin:8px 0 4px">'
+        + answer.models.filter(m => m.tools).length + ' of '
+        + answer.models.length + ' models at this endpoint can call tools. '
+        + 'The rest will write about calling one instead of calling it.'
+        + '</div><div class="buttons" style="flex-wrap:wrap;gap:4px">'
+        + answer.models.map(m => `<button class="quiet${
+            m.name === answer.current ? ' chosen' : ''}"
+            data-bench="${m.name}" title="${
+              m.tools ? 'can call tools' : 'no tool-calling template'}"
+            >${m.tools ? '&#x2699; ' : ''}${m.name}</button>`).join('')
+        + '</div>';
+    });
+    return;
+  }
+
+  if (event.target.dataset.bench) {
+    await working(event.target, async () => {
+      const answer = await (await fetch('/bench', { method: 'POST',
+        body: JSON.stringify({ model: event.target.dataset.bench }) })).json();
+      say(answer.text, answer.ok ? 'done' : 'bad', 'acted-asking');
+      if (answer.ok) $('bench-list').innerHTML = '';
+      await refresh();
+    });
+    return;
+  }
+
+  // {{{ stating a value neuron would otherwise work out
+  //
+  // One editor for every overridable row, opened by the row that wants it. A
+  // panel per setting would be five panels that differ only in their label.
+  // {{{ choosing a config file
+  if (event.target.dataset.editFile) {
+    $('config-veil').dataset.key = event.target.dataset.editFile;
+    $('config-veil').dataset.name = event.target.dataset.name;
+    $('config-title').textContent = event.target.dataset.name;
+    $('config-why').textContent = ({
+      worldserver_conf:
+        'The database connection, the ports and the level cap are all read '
+        + 'from this file. It is checked for a DatabaseInfo line before it is '
+        + 'accepted, so a .conf.dist template is refused rather than taken.',
+      authserver_conf:
+        'The realm port, and its own copy of the database connection — which '
+        + 'has to agree with the worldserver\'s, or neuron refuses to read '
+        + 'either.',
+    })[event.target.dataset.editFile] || '';
+    $('config-path').value = event.target.dataset.value || '';
+    $('config-found').innerHTML = '';
+    $('config-veil').hidden = false;
+    $('config-path').focus();
+    return;
+  }
+
+  if (event.target.id === 'config-shut' || event.target.id === 'config-veil') {
+    $('config-veil').hidden = true;
+    return;
+  }
+
+  if (event.target.id === 'config-find') {
+    await working(event.target, async () => {
+      const answer = await (await fetch('/deployment/find-config?name='
+        + encodeURIComponent($('config-veil').dataset.name))).json();
+
+      $('config-found').innerHTML = answer.found.length ? `
+        <div class="note" style="margin:14px 0 4px">${answer.found.length}
+          found under the data directory. A file that is named right and says
+          nothing neuron needs is marked — that is usually a .conf.dist
+          somebody renamed.</div>
+        ${answer.found.map(f => `
+        <div class="row" style="grid-template-columns:14px 1fr auto">
+          <div class="lamp ${f.usable ? 'on' : 'warn'}">${
+            f.usable ? '●' : '◐'}</div>
+          <div><div class="name" style="font-weight:400">${f.path}</div></div>
+          <div class="buttons">
+            <button class="quiet" data-config-pick="${f.path}">use this</button>
+          </div>
+        </div>`).join('')}`
+        : `<div class="note" style="margin:14px 0">Nothing found under
+             ${lastState.deployment}. Has the server been installed, or only
+             built?</div>`;
+    });
+    return;
+  }
+
+  if (event.target.dataset.configPick) {
+    $('config-path').value = event.target.dataset.configPick;
+    $('config-found').innerHTML = '';
+    return;
+  }
+
+  if (event.target.id === 'config-use') {
+    await working(event.target, async () => {
+      const answer = await (await fetch('/deployment/set', { method: 'POST',
+        body: JSON.stringify({ key: $('config-veil').dataset.key,
+                               value: $('config-path').value.trim() })
+      })).json();
+      say(answer.text, answer.ok ? 'done' : 'bad', 'acted-deployment');
+      if (answer.ok) $('config-veil').hidden = true;
+      await refresh();
+    });
+    return;
+  }
+  // }}}
+
+  if (event.target.dataset.edit) {
+    const key = event.target.dataset.edit;
+    const panel = $('value-editor');
+
+    $('value-editor-note').textContent = ({
+      config_dir:
+        'The directory holding worldserver.conf and authserver.conf. It is '
+        + 'checked for one before anything is written, so a wrong path is '
+        + 'refused rather than accepted and then failing later.',
+      mysql_client:
+        'The mysql client binary neuron runs. It must be a program this user '
+        + 'can execute; that is checked before it is written.',
+      worldserver_conf:
+        'The worldserver config file. The database connection, the ports and '
+        + 'the level cap are all read from it.',
+      authserver_conf:
+        'The authserver config file. The realm port, and its own copy of the '
+        + 'database connection, which must agree with the worldserver\'s.',
+    })[key] || key;
+
+    $('value-editor-input').value = event.target.dataset.value || '';
+    $('value-editor').dataset.key = key;
+    dismissed['value-editor'] = false;
+    panel.hidden = false;
+    $('value-editor-input').focus();
+    return;
+  }
+
+  if (event.target.id === 'value-editor-use'
+      || event.target.id === 'value-editor-detect') {
+    // "detect" writes nil, which is what puts a value back to being worked
+    // out. It was labelled "work it out instead", which said what it does and
+    // not what it is -- and the same button on the row above already said
+    // "detect". One word for one idea.
+    const clearing = event.target.id === 'value-editor-detect';
+
+    await working(event.target, async () => {
+      const answer = await (await fetch('/deployment/set', { method: 'POST',
+        body: JSON.stringify({ key: $('value-editor').dataset.key,
+                               value: clearing ? ''
+                                 : $('value-editor-input').value.trim() })
+      })).json();
+
+      say(answer.text, answer.ok ? 'done' : 'bad', 'acted-deployment');
+      if (answer.ok) $('value-editor').hidden = true;
+      await refresh();
+    });
+    return;
+  }
+
+  // Every client this machine has, offered rather than the first one taken.
+  // A machine with two has them for a reason, and picking silently is how
+  // neuron ends up speaking to the wrong server with results that look right.
+  if (event.target.id === 'check-account') {
+    await working(event.target, async () => {
+      const answer = await (await fetch('/deployment/check-account')).json();
+      say(answer.text, answer.ok ? 'done' : 'bad', 'acted-deployment');
+    });
+    return;
+  }
+
+  if (event.target.id === 'find-mysql') {
+    const box = $('mysql-found');
+    if (box.innerHTML) { box.innerHTML = ''; return; }
+
+    await working(event.target, async () => {
+      const answer = await (await fetch('/deployment/find-mysql')).json();
+
+      box.innerHTML = answer.found.length ? `
+        <div class="note" style="margin:8px 0 4px">${answer.found.length}
+          found. This deployment builds its own, which is why a search may
+          turn up only that one.</div>
+        ${answer.found.map(f => `
+        <div class="row" style="grid-template-columns:14px 1fr auto">
+          <div class="lamp ${f.path === answer.current ? 'on' : ''}">${
+            f.path === answer.current ? '●' : '○'}</div>
+          <div>
+            <div class="name">${f.path}</div>
+            <div class="what">${f.version}</div>
+          </div>
+          <div class="buttons">
+            <button class="quiet ${f.path === answer.current ? 'chosen' : ''}"
+              ${f.path === answer.current ? 'disabled' : ''}
+              data-edit-now="mysql_client" data-value="${f.path}">${
+              f.path === answer.current ? 'current' : 'use this'}</button>
+          </div>
+        </div>`).join('')}`
+        : `<div class="note" style="margin:8px 0">No mysql client found on
+             PATH or in the usual places. If this deployment builds its own,
+             press change and give its path.</div>`;
+    });
+    return;
+  }
+
+  // Chosen from a list rather than typed, so it skips the editor panel.
+  if (event.target.dataset.editNow) {
+    await working(event.target, async () => {
+      const answer = await (await fetch('/deployment/set', { method: 'POST',
+        body: JSON.stringify({ key: event.target.dataset.editNow,
+                               value: event.target.dataset.value })
+      })).json();
+      say(answer.text, answer.ok ? 'done' : 'bad', 'acted-deployment');
+      if (answer.ok) $('mysql-found').innerHTML = '';
+      await refresh();
+    });
+    return;
+  }
+
+  if (event.target.id === 'edit-account') {
+    const panel = $('account-editor');
+    panel.hidden = !panel.hidden;
+    dismissed['account-editor'] = false;
+    if (!panel.hidden) $('account-name').focus();
+    return;
+  }
+
+  if (event.target.id === 'account-use') {
+    await working(event.target, async () => {
+      const answer = await (await fetch('/deployment/account', { method: 'POST',
+        body: JSON.stringify({ account: $('account-name').value.trim(),
+                               password: $('account-password').value })
+      })).json();
+
+      say(answer.text, answer.ok ? 'done' : 'bad', 'acted-deployment');
+      $('account-password').value = '';
+      if (answer.ok) $('account-editor').hidden = true;
+      await refresh();
+    });
+    return;
+  }
+  // }}}
+
+  if (event.target.id === 'pick-deployment') {
+    $('picker').hidden = false;
+    $('picker-path').value = lastState.deployment || '';
+    $('picker-path').focus();
+    return;
+  }
+
+  if (event.target.id === 'picker-use') {
+    const answer = await (await fetch('/deployment', { method: 'POST',
+      body: JSON.stringify({ root: $('picker-path').value.trim() }) })).json();
+    say(answer.text, answer.ok ? 'done' : 'bad');
+    if (answer.ok) $('picker').hidden = true;
+    setTimeout(refresh, 400);
+    return;
+  }
+
+  // {{{ the profile panel
+  if (event.target.id === 'pick-profile') {
+    const names = lastState.profiles || [];
+
+    $('profile-list').innerHTML = names.length ? names.map(name => `
+      <div class="row" style="grid-template-columns:14px 1fr auto">
+        <div class="lamp ${name === lastState.profile ? 'on' : ''}">${
+          name === lastState.profile ? '\u25cf' : '\u25cb'}</div>
+        <div><div class="name">${name}</div></div>
+        <div class="buttons">
+          <button class="quiet ${name === lastState.profile ? 'chosen' : ''}"
+            ${name === lastState.profile ? 'disabled' : ''}
+            data-profile="${name}">${
+            name === lastState.profile ? 'current' : 'switch'}</button>
+        </div>
+      </div>`).join('')
+      : '<div class="note">This deployment has no built profiles.</div>';
+
+    $('profile-veil').hidden = false;
+    return;
+  }
+
+  if (event.target.id === 'profile-shut' || event.target.id === 'profile-veil') {
+    $('profile-veil').hidden = true;
+    return;
+  }
+  // }}}
+
+  if (event.target.dataset.profile) {
+    const wanted = event.target.dataset.profile;
+
+    // Anything still running has to stop first, and the person is OFFERED
+    // that rather than told to go and do it.
+    //
+    // The server refuses this on its own -- it must, because the page's view
+    // of what is up is a few seconds old at best -- but a refusal is a dead
+    // end. It names a task and hands it back. Same shape as stopping mysql
+    // under a running worldserver: say why, then offer to do it.
+    //
+    // ollama is not in this list. It holds no world, cares about no profile,
+    // and stopping it would lose a conversation for no reason.
+    const running = (lastState.services || [])
+      .filter(s => s.up && !s.profile_agnostic).map(s => s.name);
+
+    if (running.length) {
+      ask('switch to ' + wanted,
+          'Switching points neuron at a different set of databases while '
+        + running.join(' and ') + ' still hold the old ones in memory. '
+        + 'Everything would appear to work and every answer would be about a '
+        + 'different world. Press ok to stop ' + running.join(' and ')
+        + ', in order, and then switch.',
+          () => stopThenSwitch(running, wanted));
+      return;
+    }
+
+    await switchProfile(wanted);
+    $('profile-veil').hidden = true;
+    return;
+  }
+});
+
+// NOTHING refreshes on a timer.
+//
+// A page that refreshed itself meant every open browser asking every few
+// seconds -- and with five hundred people talking to conversations, five
+// hundred browsers asking about a set of facts that changes a few times a day.
+// The cost of a menu should not scale with how many people have it open.
+//
+// So: read once on load, and again when somebody presses something. The only
+// automatic polling left is `watchFor`, which runs while a start or stop is
+// actually in flight and stops the moment it settles -- the one time the
+// answer is genuinely changing.
+refresh();
+
+// The guide's hamburger links here with ?library=1, because the library is a
+// panel on this page rather than a page of its own. Arriving with it set opens
+// it, so a link from elsewhere lands where it said it would.
+if (new URLSearchParams(location.search).get('library') === '1') {
+  const open = $('library-open');
+  if (open) open.click();
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+# -----------------------------------------------------------------------------
+# check-page -- does the JavaScript in a page actually parse?
+#
+# WHY THIS EXISTS: menu.html has now shipped broken twice with a missing brace,
+# and both times the only instrument that found it was the person reloading the
+# page and pasting the browser console back. A missing `}` does not break the
+# line it is on -- it breaks the whole <script>, so the page renders its markup,
+# runs none of its code, and looks like a subtle logic bug rather than a
+# one-character typo.
+#
+# There is no node on this machine (its sqlite extension is broken) and no
+# modern JS engine. There IS rhino, Mozilla's engine in Java -- old enough that
+# it rejects async/await, class, spread and for-of, but a genuine parser for
+# everything else, including the template literals and regex literals that
+# defeated every hand-written brace counter.
+#
+# So: pull the script out of the page, rewrite the handful of constructs rhino
+# predates into equivalents it accepts, and ask it to COMPILE the result without
+# running it. The rewrites change what the code means and that is fine -- this
+# asks one question, "do the delimiters close", and the answer survives them.
+#
+# Usage:  scripts/check-page                 # every page in assets/
+#         scripts/check-page assets/menu.html
+# -----------------------------------------------------------------------------
+
+DIR="/mnt/mtwo/games/azeroth-core/wow-chat-neuron"
+[ -n "$2" ] && DIR="$2"
+
+# The RAM tier, made if it is not there. `tmp/` is a SYMLINK into /tmp, and
+# /tmp is cleaned -- by a reboot, by systemd, by anything -- which leaves the
+# link dangling and every write through it failing. `mkdir -p` on a path that
+# goes through a dangling symlink does not fix the link; it fails, and then this
+# reported a missing file as though the page were unparseable.
+source "${DIR}/scripts/ram-tier"
+ensure_ram_tier "${DIR}"
+
+WORK="${DIR}/tmp/shared-memory"
+
+pages="$1"
+if [ -z "${pages}" ]; then
+    pages=$(ls "${DIR}"/assets/*.html)
+fi
+
+status=0
+
+for page in ${pages}; do
+    name=$(basename "${page}")
+    stripped="${WORK}/check-${name}.js"
+
+    # ---- 1. the script out of the page -------------------------------------
+    # Everything between <script> and </script>, with the surrounding markup
+    # replaced by blank lines so reported line numbers match the HTML file.
+    python3 - "${page}" "${stripped}" <<'PYTHON'
+import re, sys
+
+page = open(sys.argv[1]).read()
+lines = page.split("\n")
+inside = False
+kept = []
+
+for line in lines:
+    if not inside:
+        if "<script" in line and "src=" not in line:
+            inside = True
+            kept.append("")          # the <script> tag line itself
+            continue
+        kept.append("")
+    else:
+        if "</script>" in line:
+            inside = False
+            kept.append("")
+            continue
+        kept.append(line)
+
+source = "\n".join(kept)
+
+# ---- 2. rewrite what rhino predates ---------------------------------------
+# Every one of these is a SYNTAX-ONLY substitution. The result is not the same
+# program; it is the same shape of program, which is the only thing being
+# measured. Each rewrite keeps the character count on its line where it can, so
+# a reported column still points somewhere useful.
+rewrites = [
+    # async function f() -> function f()
+    (r'\basync\s+function\b',            'function      '),
+    # async x => / async (x) => -> x => / (x) =>
+    (r'\basync\s+(?=[\(\w])',            '      '),
+    # await expr -> expr
+    (r'\bawait\s+',                      '      '),
+    # for (const x of y) -> for (var x in y)
+    (r'\bfor\s*\(\s*(const|let)\s+(\w+)\s+of\b',
+                                         r'for (var \2 in'),
+    # {...a, b} -> {a__: a, b}   (object spread)
+    (r'\{\s*\.\.\.',                     '{ spread__: '),
+    # f(...a) -> f(a)            (call spread)
+    (r'\(\s*\.\.\.',                     '(   '),
+    # [...a] -> [a]              (array spread)
+    (r'\[\s*\.\.\.',                     '[   '),
+    # a?.b -> a.b                (optional chaining)
+    (r'\?\.',                            '. '),
+    # a ?? b -> a || b           (nullish coalescing)
+    (r'\?\?',                            '||'),
+    # class K { -> var K = function() {   ... only if a page ever grows one
+    (r'\bclass\s+(\w+)\s*\{',            r'var \1 = function() {'),
+    # const/let -> var.
+    #
+    # Not about syntax: rhino accepts `const` but gives it FUNCTION scope, the
+    # pre-ES6 meaning, so two `const answer` in two different blocks read as one
+    # variable declared twice and it refuses. Every one of those is correct
+    # modern code. Flattening to `var` removes a question this tool is not
+    # asking -- block scoping is a semantic property, and this measures
+    # delimiters.
+    (r'\bconst\b',                       'var  '),
+    (r'\blet\b',                         'var'),
+]
+
+for pattern, replacement in rewrites:
+    source = re.sub(pattern, replacement, source)
+
+open(sys.argv[2], "w").write(source)
+PYTHON
+
+    # The extractor failing silently is how this tool once reported a missing
+    # FILE as a syntax error and buried the real answer under a Java stack
+    # trace. If step 1 produced nothing, say that and say nothing else.
+    if [ ! -s "${stripped}" ]; then
+        printf '  %-16s COULD NOT BE READ\n' "${name}"
+        printf '    No <script> block was extracted from %s\n' "${page}"
+        status=1
+        continue
+    fi
+
+    # ---- 3. compile without running ----------------------------------------
+    # `new Function(text)` compiles and throws on a syntax error, and never
+    # executes the body -- so nothing here touches a DOM that is not there.
+    answer=$(rhino -e "
+        var text = readFile('${stripped}');
+        try { new Function(text); print('OK'); }
+        catch (e) {
+            print('FAIL ' + e
+                + (e.lineNumber ? '  (line ' + e.lineNumber + ')' : ''));
+        }
+    " 2>&1 | grep -v 'jline.jar')
+
+    case "${answer}" in
+        OK*) printf '  %-16s parses\n' "${name}" ;;
+        *)   printf '  %-16s DOES NOT PARSE\n' "${name}"
+             printf '    %s\n' "${answer}"
+             printf '    (line numbers are the HTML file, downlevelled at %s)\n' \
+                    "${stripped}"
+             status=1 ;;
+    esac
+done
+
+exit ${status}

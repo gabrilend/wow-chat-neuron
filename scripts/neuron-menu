@@ -1,0 +1,156 @@
+#!/bin/bash
+# neuron-menu
+#
+# The front door: what is running, what is not, and every conversation.
+#
+# Usage:
+#   scripts/neuron-menu              start it (or say where it already is)
+#   scripts/neuron-menu restart      stop it and start it again
+#   scripts/neuron-menu stop         close it
+#   scripts/neuron-menu status       is it up, and where
+#   scripts/neuron-menu --port N     any of the above on a different port
+#   scripts/neuron-menu --lan        open it to this machine's own network
+#   scripts/neuron-menu --host ADDR  bind one specific address
+#   scripts/neuron-menu --help       this
+#
+# Everything else -- conversations, the configuration window, the servers --
+# is reached from the page. There is one port and this is it.
+#
+# ON --lan: the page has no login. Every lever on it, including the one that
+# removes characters and cannot be undone, is available to anybody who can
+# reach the address. That is a fine trade on a home network you own and it is
+# not a trade to make anywhere else. Loopback stays the default so that opening
+# it is always somebody's decision.
+
+set -uo pipefail
+
+# {{{ set_dir
+DIR="/mnt/mtwo/games/azeroth-core/wow-chat-neuron"
+if [[ -n "${1:-}" && -d "${1:-}" && -f "${1:-}/src/060-menu-main.lua" ]]; then
+    DIR="$1"; shift
+fi
+# }}}
+
+# {{{ settings
+PORT="7900"
+ACTION="start"
+
+# Empty means loopback. Passed through to the server as-is, so there is one
+# place -- Http.listen -- that decides what "no address given" means.
+HOST=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --port)  PORT="$2"; shift 2 ;;
+        --host)  HOST="$2"; shift 2 ;;
+        # 0.0.0.0 rather than the machine's own address, because a machine can
+        # hold several and binding one of them means the others stop answering
+        # -- including 127.0.0.1, which is what everything local already uses.
+        --lan)   HOST="0.0.0.0"; shift ;;
+        --help|-h|help)
+            # Everything from line 2 until the first line that is not a
+            # comment. A fixed line range goes stale the moment the header
+            # grows -- it just did, and printed `set -uo pipefail` as help.
+            awk 'NR>1 { if ($0 !~ /^#/) exit; sub(/^# ?/, ""); print }' "$0"
+            exit 0 ;;
+        start|stop|restart|status) ACTION="$1"; shift ;;
+        *) echo "neuron-menu: no such option: $1  (try --help)" >&2; exit 2 ;;
+    esac
+done
+# }}}
+
+# {{{ helpers
+# Where somebody types to reach this. Asked of the routing table, the same way
+# the server asks: `hostname -I` prints every address the machine holds, docker
+# bridges included, in an order nothing guarantees.
+where_to_reach() {
+    if [[ -z "${HOST}" || "${HOST}" == "127.0.0.1" ]]; then
+        echo "127.0.0.1"; return
+    fi
+    if [[ "${HOST}" == "0.0.0.0" ]]; then
+        ip route get 1.1.1.1 2>/dev/null \
+            | grep -o 'src [0-9.]*' | cut -d' ' -f2 | head -1
+        return
+    fi
+    echo "${HOST}"
+}
+
+holders() {
+    ss -lptnH "sport = :${PORT}" 2>/dev/null \
+        | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u
+}
+
+stop_it() {
+    local found; found="$(holders)"
+    [[ -z "${found}" ]] && { echo "Not running on port ${PORT}"; return 0; }
+
+    # Every holder, not the first. Two processes can end up on one port after a
+    # restart raced a slow shutdown, and killing one leaves the other serving
+    # code from twenty minutes ago.
+    for pid in ${found}; do kill "${pid}" 2>/dev/null; done
+
+    for _ in $(seq 1 20); do
+        [[ -z "$(holders)" ]] && { echo "Stopped (was ${found})"; return 0; }
+        sleep 0.25
+    done
+
+    for pid in ${found}; do kill -9 "${pid}" 2>/dev/null; done
+    sleep 0.5
+    echo "Stopped, forcibly (was ${found})"
+}
+
+start_it() {
+    local found; found="$(holders)"
+    if [[ -n "${found}" ]]; then
+        echo "Already open at http://$(where_to_reach):${PORT} (PID ${found})"
+        echo "  scripts/neuron-menu restart   to pick up code changes"
+        return 0
+    fi
+
+    source "${DIR}/scripts/ram-tier"
+    ensure_ram_tier "${DIR}"
+
+    local log="${DIR}/tmp/shared-memory/menu-${PORT}.log"
+    # stdbuf, because stdout redirected to a FILE is block-buffered: the
+    # banner -- including the warning that the page is open on the network --
+    # sat in a 4KB buffer and never reached the log, so the one place somebody
+    # would look to find out how this was started said nothing at all.
+    nohup stdbuf -oL -eL \
+        luajit "${DIR}/src/060-menu-main.lua" "${DIR}" "${PORT}" "${HOST}" \
+        > "${log}" 2>&1 &
+
+    for _ in $(seq 1 20); do
+        if [[ -n "$(holders)" ]]; then
+            echo ""
+            echo "  neuron   http://$(where_to_reach):${PORT}"
+            if [[ -n "${HOST}" && "${HOST}" != "127.0.0.1" ]]; then
+                echo ""
+                echo "  Open on the network. There is no login -- anybody who"
+                echo "  can reach that address can pull every lever on the page."
+            fi
+            echo ""
+            return 0
+        fi
+        sleep 0.25
+    done
+
+    echo "ERROR: nothing is listening after five seconds." >&2
+    sed 's/^/  /' "${log}" >&2
+    return 1
+}
+# }}}
+
+# {{{ run
+case "${ACTION}" in
+    start)   start_it ;;
+    stop)    stop_it ;;
+    restart) stop_it; start_it ;;
+    status)
+        found="$(holders)"
+        if [[ -n "${found}" ]]; then
+            echo "up    http://$(where_to_reach):${PORT}   PID ${found}"
+        else
+            echo "down  nothing on port ${PORT}"
+        fi ;;
+esac
+# }}}

@@ -17,6 +17,7 @@
    --------------------------------------------------------------------------- */
 
 :root {
+  /* the turning mark shown while a model is thinking */
   --ink:        #d8d2c4;
   --dim:        #8a8375;
   --gold:       #ffd100;
@@ -51,6 +52,99 @@
   --legendary: #ff8000;
 }
 
+/* A tool call gets its own line and its own colour. Something happened to the
+   world -- or to the configuration -- and a conversation that only shows the
+   prose around it is a conversation that hid the part that mattered. */
+/* Colour means one thing each, everywhere:
+     cyan     a tool being called -- the machine acting
+     green    what that tool handed back
+     yellow   the system speaking to the person, and nothing else
+     red      something refused                                        */
+.row.tool .what        { color: #40e0e0; }
+.row.tool .what .args  { color: var(--dim); }
+.row.tool .what .back  { color: var(--uncommon); }
+.row.tool .what .failed { color: var(--error); }
+
+/* The FAQ: a question is cyan and larger, its commands plain beneath it. */
+.row.faq .what          { color: var(--dim); white-space: pre; }
+.row.faq.q .what        { color: #40e0e0; font-size: 15px; font-weight: 600;
+                          padding-top: 10px; }
+.row.faq.heading .what  { text-align: right; color: var(--dim);
+                          font-size: 12px; padding-right: 4px; }
+.row.faq.rule .what     { color: var(--error); white-space: pre;
+                          overflow: hidden; }
+
+@keyframes turning { to { transform: rotate(360deg); } }
+.turning {
+  display: inline-block; width: 9px; height: 9px; margin-right: 8px;
+  border: 2px solid var(--gold-edge); border-top-color: var(--gold);
+  border-radius: 50%; animation: turning .8s linear infinite;
+  vertical-align: -1px;
+}
+
+/* The levers, beside the conversation rather than behind a different door.
+   Everything the model can pull, a person can pull -- through the same plan and
+   the same confirmation, because a form that applied directly would be a hole
+   through the one rule the whole design rests on. */
+#levers {
+  position: fixed; top: 0; right: 0; bottom: 0; width: 360px;
+  background: var(--frame-soft); border-left: 1px solid var(--gold-edge);
+  padding: 18px 18px 40px; overflow-y: auto; z-index: 5;
+  transform: translateX(100%); transition: transform .22s ease-out;
+}
+#levers.out { transform: translateX(0); }
+
+#levers h4 {
+  margin: 0 0 3px; font-size: 12.5px; color: var(--ink); font-weight: 600;
+}
+#levers .lever {
+  border-bottom: 1px solid #1c1c22; padding: 10px 0;
+}
+#levers .lever:last-child { border-bottom: 0; }
+
+/* Only the chosen lever shows its arguments. Fifteen fields down a narrow
+   column is a form nobody reads; one lever's three fields is a question. */
+#levers .lever .body { display: none; }
+#levers .lever.chosen .body { display: block; }
+#levers .lever .head { cursor: pointer; }
+#levers .lever.chosen .head h4 { color: var(--gold); }
+#levers .lever .head:hover h4 { color: var(--gold); }
+#levers .say { color: var(--dim); font-size: 11.5px; margin-bottom: 7px; }
+#levers label { display: block; margin: 5px 0; }
+#levers .pname { color: var(--dim); font-size: 11px; }
+#levers .pname .must { color: var(--gold-deep); }
+/* A field is as tall as the description it is holding.
+   The placeholder is the parameter's own prose and it is often two or three
+   lines; a one-line box cut it off mid-sentence, losing exactly the part that
+   explained what to type. Sized once, from the description, and never resized
+   as somebody types -- a box that grows under the cursor is worse than a box
+   that was always the right size. */
+#levers textarea {
+  width: 100%; font: inherit; font-size: 11.5px; margin-top: 2px;
+  background: #08080a; color: var(--ink); resize: vertical;
+  border: 1px solid #26262c; padding: 4px 7px; line-height: 1.4;
+}
+#levers textarea:focus { outline: none; border-color: var(--gold-edge); }
+#levers input:focus { outline: none; border-color: var(--gold-edge); }
+#levers .glyph { float: right; color: var(--gold-deep); }
+#levers .glyph.final { color: var(--error); }
+
+/* The button rides with the panel rather than sitting over it. Fixed in the
+   corner, it covered the panel's own first line -- which is where the
+   explanation of what the panel is lives. */
+#levers-toggle {
+  position: fixed; top: 12px; right: 12px; z-index: 7;
+  transition: right .22s ease-out;
+}
+#levers-toggle.out { right: 372px; }
+
+/* Eighty characters and not one more. The window scrolled sideways for a silly
+   distance because nothing constrained a long line -- a log is read down, never
+   across, and a horizontal scrollbar in a chat is a line somebody has to drag
+   to finish reading. */
+#log, #log * { max-width: 100%; overflow-wrap: anywhere; word-break: break-word; }
+#log { overflow-x: hidden; }
+
 * { box-sizing: border-box; }
 
 html, body {
@@ -73,7 +167,11 @@ body {
 /* --- the frame ---------------------------------------------------------- */
 
 .frame {
-  width: min(980px, 100%);
+  /* Eighty characters of text, and the border outside them. `ch` is the width
+     of a zero in the current font, which for a monospace face is every
+     character -- so this is literally eighty columns, whatever the font size.
+     The padding and border sit outside it rather than eating into it. */
+  width: min(calc(80ch + 48px), 100%);
   height: min(760px, calc(100vh - 36px));
   display: flex;
   flex-direction: column;
@@ -308,6 +406,8 @@ button:disabled { opacity: .4; cursor: default; }
 </style>
 </head>
 <body>
+<button id="levers-toggle">levers</button>
+<aside id="levers"><div class="say">reading…</div></aside>
 
 <div class="frame">
 
@@ -325,18 +425,10 @@ button:disabled { opacity: .4; cursor: default; }
   <div class="say">
     <span class="prompt">&rsaquo;</span>
     <input id="input" autocomplete="off" autofocus
-           placeholder="say what you want &mdash; try: who are the hunters">
+           placeholder="say what you want &mdash; /help lists what this window can do">
   </div>
 
-  <div class="hint">
-    <code>who are the hunters</code> &nbsp;
-    <code>where is ratchet</code> &nbsp;
-    <code>move the hunters to ratchet</code> &nbsp;
-    <code>receipts</code> &nbsp;
-    <code>help</code>
-  </div>
 
-</div>
 
 <script>
 const log   = document.getElementById('log');
@@ -415,7 +507,14 @@ function showPlan(text, planId) {
   go.onclick = async () => {
     go.disabled = true; no.disabled = true;
     go.textContent = 'working…';
-    const r = await post('/apply', { plan_id: planId });
+    // The route is /conversation/apply and the field is `plan`, both of which
+    // this had wrong -- so agreeing to a plan has never once worked. It failed
+    // silently too: the 404 body was a plain sentence, `post` called .json()
+    // on it, and the exception surfaced as an unexplained JSON.parse error
+    // that read like the model had broken. It only became findable when `post`
+    // started reporting the status and the body it actually got.
+    const r = await post('/conversation/apply',
+      { id: conversationId, plan: planId });
     choices.remove();
     head.textContent = r.outcome === 'complete' ? 'done' : 'did not finish';
     head.style.color = r.outcome === 'complete' ? 'var(--uncommon)' : 'var(--error)';
@@ -461,22 +560,106 @@ function showRoster(people) {
   remember(log.innerHTML);
 }
 
+// Which conversation this page is. From the URL, so a link IS the conversation
+// -- shareable, bookmarkable, and revivable, because everything it needs is in
+// a file named by that id rather than in a process on a port.
+const conversationId = new URLSearchParams(location.search).get('id');
+
+// Which model this window asks. Chosen when a conversation is picked back up;
+// absent means whatever the conversation's own levers imply.
+const preferModel = new URLSearchParams(location.search).get('model');
+
+// The FAQ, drawn from lines the server wrote in advance. A question is cyan and
+// larger; "@ " is a right-justified heading; "---" is a rule.
+function drawFaq(lines) {
+  lines.forEach(l => {
+    const question = l.indexOf('# ') === 0;
+    const heading  = l.indexOf('@ ') === 0;
+    const rule     = l === '---';
+
+    const row = document.createElement('div');
+    row.className = 'row faq'
+      + (question ? ' q' : '') + (heading ? ' heading' : '')
+      + (rule ? ' rule' : '');
+
+    const text = rule ? '\u2500'.repeat(400)
+                      : (question || heading ? l.slice(2) : l);
+
+    row.innerHTML = '<span class="who"></span><span class="what">'
+      + text.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</span>';
+    log.appendChild(row);
+  });
+}
+
 async function post(path, payload) {
+  let response;
   try {
-    const response = await fetch(path, {
+    response = await fetch(path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-    return await response.json();
   } catch (e) {
-    return { kind: 'trouble', text: 'the server did not answer: ' + e.message };
+    return { kind: 'trouble', text: 'nothing answered at ' + path
+      + '.\n' + e.message
+      + '\n\nThe menu server was started from a terminal; look there.' };
   }
+
+  // The body is read as TEXT first and parsed second.
+  //
+  // `response.json()` on a non-JSON body throws "JSON.parse: unexpected
+  // character at line 1 column 1", which names neither the route, nor the
+  // status, nor the character. The server answering a route it does not have
+  // with the plain sentence "no such conversation route" produced exactly that,
+  // and it read as the model having failed.
+  const body = await response.text();
+
+  try {
+    return JSON.parse(body);
+  } catch (e) {
+    return { kind: 'trouble', text:
+        path + ' answered ' + response.status + ' '
+      + (response.statusText || '') + ' with something that is not JSON.'
+      + '\n\nWhat it said:\n' + (body.slice(0, 400) || '(nothing at all)')
+      + (body.length > 400 ? '\n...(' + body.length + ' characters)' : '') };
+  }
+}
+
+// While a model is thinking, the window used to sit perfectly still. There is
+// no way to tell that apart from a window that has crashed, so it says so --
+// with a turning mark and a count, because "thinking" that has been on screen
+// for ninety seconds is a different message from one that has been there for
+// two.
+function waiting() {
+  const row = document.createElement('div');
+  row.className = 'row system';
+  row.innerHTML = '<span class="who">neuron</span>'
+    + '<span class="what">&nbsp;<span class="turning"></span>'
+    + '<span class="elapsed">thinking</span></span>';
+  log.appendChild(row);
+  log.scrollTop = log.scrollHeight;
+
+  const began = Date.now();
+  const mark = row.querySelector('.elapsed');
+
+  const ticking = setInterval(() => {
+    const seconds = Math.round((Date.now() - began) / 1000);
+    mark.textContent = seconds < 4 ? 'thinking'
+      : seconds < 25 ? 'thinking… ' + seconds + 's'
+      : seconds < 90 ? 'still thinking… ' + seconds + 's'
+      : 'thinking… ' + seconds + 's — a long turn, or something is stuck';
+  }, 500);
+
+  return () => { clearInterval(ticking); row.remove(); };
 }
 
 async function ask(text) {
   line('you', 'you', text);
-  const r = await post('/ask', { text: text });
+
+  const done = waiting();
+  const r = await post('/conversation/ask',
+    { id: conversationId, text: text, model: preferModel });
+  done();
 
   if (r.kind === 'plan') {
     showPlan(r.text, r.plan_id);
@@ -486,12 +669,129 @@ async function ask(text) {
   const p = line(r.kind === 'trouble' ? 'trouble' : (r.kind === 'done' ? 'done' : 'system'),
                  'neuron', r.text, true);
 
+  // Every tool it called, before the prose about them -- so the order on
+  // screen is the order things happened.
+  if (r.calls) r.calls.forEach(c => {
+    const row = document.createElement('div');
+    row.className = 'row tool';
+    row.innerHTML = '<span class="who"></span><span class="what">'
+      + (c.ok ? '⚙ ' : '<span class="failed">⚠ </span>')
+      + c.tool
+      + (c.arguments ? ' <span class="args">' + c.arguments + '</span>' : '')
+      + (c.ok
+          ? (c.summary ? '\n   <span class="back">' + c.summary + '</span>' : '')
+          : ' <span class="failed">refused</span>'
+            + (c.summary ? '\n   <span class="failed">' + c.summary + '</span>' : ''))
+      + '</span>';
+    row.style.whiteSpace = 'pre-wrap';
+    log.appendChild(row);
+  });
+
+  // Which model produced this, when it was not the configured one. A plan
+  // written by a small local model and one written by a frontier model read
+  // alike and are not alike.
+  if (r.answered_by) line('system', null, '— ' + r.answered_by, true);
+
   if (r.people && r.people.length) showRoster(r.people);
 
-  if (r.examples) {
-    r.examples.forEach(e => line('system', null, '  ' + e, true));
-  }
+
 }
+
+// --- the levers panel ---------------------------------------------------------
+// Drawn from this window's OWN vocabulary. A configuration window lists five
+// words and a world window lists six, and neither can see the other's -- so the
+// panel cannot offer a lever this window would refuse.
+
+async function drawLevers() {
+  const panel = document.getElementById('levers');
+  const v = await (await fetch('/conversation/vocabulary?id='
+    + encodeURIComponent(conversationId))).json();
+
+  if (v.trouble) { panel.innerHTML = '<div class="say">' + v.trouble + '</div>'; return; }
+
+  panel.innerHTML = '<div class="say" style="padding-top:34px">Everything this '
+    + 'window can pull. Choosing '
+    + 'one shows what it needs; filling it in gives you the same plan the model '
+    + 'would produce, confirmed the same way.</div>'
+    + v.words.map(w => `
+      <div class="lever" data-op="${w.name}">
+        <div class="head">
+          <span class="glyph ${w.kind === 'final' ? 'final' : ''}">${w.glyph}</span>
+          <h4>${w.name}</h4>
+          <div class="say">${w.summary}</div>
+        </div>
+        <div class="body">
+          ${w.params.length ? w.params.map(p => `
+            <label>
+              <span class="pname">${p.name}${p.required
+                ? '<span class="must"> *</span>' : ''} — ${p.type}</span>
+              <textarea data-p="${p.name}" rows="${
+              // One line per 44 characters, which is what fits at this width.
+              Math.max(1, Math.ceil(p.describes.length / 44))
+            }" placeholder="${p.describes.replace(/"/g, '&quot;')}"></textarea>
+            </label>`).join('')
+          : '<div class="say" style="margin:6px 0">takes nothing</div>'}
+          <button data-pull="${w.name}">${
+            w.kind === 'read' ? 'look' : 'plan it'}</button>
+        </div>
+      </div>`).join('');
+}
+
+document.getElementById('levers-toggle').addEventListener('click', event => {
+  const panel = document.getElementById('levers');
+  const open = !panel.classList.contains('out');
+
+  panel.classList.toggle('out', open);
+  event.target.classList.toggle('out', open);
+  event.target.textContent = open ? 'close' : 'levers';
+
+  if (open) drawLevers();
+});
+
+document.getElementById('levers').addEventListener('click', async event => {
+  // Choosing a lever. One open at a time -- opening a second closes the first,
+  // so what is on screen is always the one question being asked.
+  const head = event.target.closest && event.target.closest('.head');
+  if (head) {
+    const lever = head.closest('.lever');
+    const wasChosen = lever.classList.contains('chosen');
+    document.querySelectorAll('#levers .lever')
+            .forEach(l => l.classList.remove('chosen'));
+    if (!wasChosen) {
+      lever.classList.add('chosen');
+      const first = lever.querySelector('textarea');
+      if (first) first.focus();
+    }
+    return;
+  }
+
+  const name = event.target.dataset && event.target.dataset.pull;
+  if (!name) return;
+
+  const box = event.target.closest('.lever');
+  const args = {};
+  box.querySelectorAll('textarea').forEach(i => { args[i.dataset.p] = i.value; });
+
+  line('you', 'you', name + ' ' + Object.entries(args)
+    .filter(([, v]) => v !== '').map(([k, v]) => k + '=' + v).join(' '));
+
+  event.target.disabled = true;
+  const done = waiting();
+  const r = await post('/conversation/pull',
+    { id: conversationId, operation: name, arguments: args });
+  done();
+  event.target.disabled = false;
+
+  if (r.kind === 'plan') { showPlan(r.text, r.plan); return; }
+  line(r.kind === 'trouble' ? 'trouble' : 'system', 'neuron', r.text, true);
+});
+
+// Enter inside a lever's field pulls it, so a one-argument lever is type-and-go.
+document.getElementById('levers').addEventListener('keydown', e => {
+  if (e.key !== 'Enter' || e.shiftKey) return;
+  const lever = e.target.closest && e.target.closest('.lever');
+  if (lever) { e.preventDefault(); lever.querySelector('[data-pull]').click(); }
+});
 
 input.addEventListener('keydown', e => {
   if (e.key !== 'Enter') return;
@@ -501,30 +801,80 @@ input.addEventListener('keydown', e => {
   ask(text);
 });
 
-/* Opening: say where we are pointed, so the first thing on screen is which
-   world is about to be changed. */
+/* Opening: show the conversation that already exists.
+
+   The page draws itself from the transcript rather than from anything it kept.
+   So a refresh, a second browser, and reviving something from last week are all
+   the same operation -- which is what makes several people watching one
+   conversation possible later without changing anything here. */
 (async () => {
-  const saved = recall();
-  if (saved) { log.innerHTML = saved; log.scrollTop = log.scrollHeight; }
-
-  const r = await post('/ask', { text: 'status' });
-  const profile = (r.text.match(/profile\s*:\s*(\S+)/) || [])[1];
-  where.innerHTML = profile
-    ? 'pointed at <b>' + profile + '</b>'
-    : 'not connected';
-
-  if (!saved) {
-    line('system', 'neuron', r.text, true);
-    line('system', null, 'Say something. "help" lists what I understand.');
+  if (!conversationId) {
+    line('trouble', 'neuron', 'This page needs a conversation. Open one from '
+      + 'the menu.', true);
+    return;
   }
 
-  /* ?ask=... runs a question on load, so a useful one can be bookmarked or
-     linked. It goes through exactly the same path as typing it, so a linked
-     question that would change something still stops at its plan. */
-  const asked = new URLSearchParams(location.search).get('ask');
-  if (asked) ask(asked);
+  const text = await (await fetch('/conversation/text?id='
+    + encodeURIComponent(conversationId))).text();
+
+  let sawAnything = false;
+
+  // The transcript's own markers, rendered as the conversation they describe.
+  text.split(/\n(?=\[)/).forEach(block => {
+    const marker = (block.match(/^\[(\w+)\]\s*(.*)/) || []);
+    if (!marker[1]) return;
+
+    const body = block.slice(block.indexOf('\n') + 1)
+                      .replace(/\n $/gm, '').trim();
+    if (!body) return;
+
+    if (marker[1] === 'you')    { line('you', 'you', body); sawAnything = true; }
+    if (marker[1] === 'neuron') {
+      // The conversation's opening turn is the FAQ, and it is a real turn --
+      // the model sees it as the last thing it said before the person spoke.
+      // Here it keeps the FAQ's own shape rather than becoming a wall of
+      // assistant prose. The name rides on the marker line.
+      if (marker[2] === 'faq') drawFaq(body.split('\n'));
+      else line('system', 'neuron', body, true);
+      sawAnything = true;
+    }
+    if (marker[1] === 'tool') {
+      const row = document.createElement('div');
+      row.className = 'row tool';
+      row.style.whiteSpace = 'pre-wrap';
+      row.innerHTML = '<span class="who"></span><span class="what">⚙ '
+        + (marker[2] || '') + '</span>';
+      log.appendChild(row);
+      sawAnything = true;
+    }
+    if (marker[1] === 'result') {
+      const row = document.createElement('div');
+      row.className = 'row tool';
+      row.style.whiteSpace = 'pre-wrap';
+      row.innerHTML = '<span class="who"></span><span class="what">'
+        + '<span class="back">' + body.replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;') + '</span></span>';
+      log.appendChild(row);
+    }
+  });
+
+  const levers = (text.match(/levers\s+(\w+)/) || [])[1] || 'world';
+  where.innerHTML = levers === 'asking'
+    ? 'configuring &mdash; <b>local model only</b>'
+    : 'pointed at <b>' + ((text.match(/profile\s+(\S+)/) || [])[1] || '?') + '</b>';
+
+  // A transcript with no opening turn in it is one begun before openings
+  // existed. Fetching it keeps those conversations readable rather than
+  // rewriting the files they live in.
+  if (!sawAnything) {
+    const faq = await (await fetch('/faq?id='
+      + encodeURIComponent(conversationId))).json();
+    if (faq && faq.lines && faq.lines.length) drawFaq(faq.lines);
+    line('system', null, 'Say something. /help lists what this window can do.');
+  }
+
+  log.scrollTop = log.scrollHeight;
 })();
 </script>
-
 </body>
 </html>
