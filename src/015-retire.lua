@@ -31,12 +31,23 @@ end
 
 -- {{{ Retire.declaration
 Retire.declaration = {
-    name    = "character.retire",
-    summary = "Remove characters and every row that refers to them. Cannot be undone.",
+    -- RENAMED, and out of every vocabulary.
+    --
+    -- `character.retire` now means the game's deleted queue -- reversible, and
+    -- purged by the worldserver after CharDelete.KeepDays. See 071-shelve.lua.
+    -- This is the permanent one, and nothing a model can say reaches it: it is
+    -- a command-line operation, for the case it was written for, which is the
+    -- nine hundred characters whose accounts were deleted years ago and whose
+    -- rows were left behind.
+    name    = "character.purge",
+    summary = "Erase characters and every row that refers to them, permanently. "
+           .. "Not the deleted queue -- this is the end of it. Cannot be undone.",
     hands   = { "cold" },
     -- Stated as data, not as a comment, so anything reading the registry -- the
-    -- command line, and in phase 8 the tool schema -- can gate on it.
-    reversible = false,
+    -- command line and the tool schema -- can gate on it. `final` rather than a
+    -- false `reversible`, because this writes a receipt that RECORDS what was
+    -- destroyed and cannot put it back, and a boolean had no way to say that.
+    kind    = "final",
     params = {
         { name = "roster", type = "roster", required = true,
           describes = "Who to remove. A name, a list of names, or a query." },
@@ -392,7 +403,12 @@ function Retire.backup(handle)
         "MYSQL_PWD=" .. quote(handle.mysql_password),
         quote(dump),
         "--no-defaults",
-        "--socket=" .. quote(handle.mysql_socket),
+        -- Host and port, matching the cold hand. The socket field is gone:
+        -- it was built from the project root, so it existed only on a
+        -- deployment that keeps MySQL inside itself.
+        "--host=" .. quote(handle.mysql_host),
+        "--port=" .. tostring(handle.mysql_port),
+        "--protocol=TCP",
         "--user="   .. quote(handle.mysql_user),
         -- NOT --single-transaction. On this client that issues FLUSH TABLES
         -- first, which needs the RELOAD privilege the deployment's database user
