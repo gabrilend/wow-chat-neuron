@@ -1,0 +1,59 @@
+#!/bin/bash
+# vocabulary
+#
+# Print the closed set of words neuron knows -- every operation, the ways it can
+# reach the world, whether it can be undone, and what it takes as arguments -- as
+# an eighty-column table.
+#
+# The declarations are the source; the table is generated from them. Writes
+# docs/vocabulary.txt by default, or to stdout when asked, or to a path you name.
+#
+# Usage:
+#   scripts/vocabulary                   rewrite docs/vocabulary.txt
+#   scripts/vocabulary --stdout          print it instead
+#   scripts/vocabulary --out /some/path  write it somewhere else
+#   scripts/vocabulary /other/project    run against another checkout
+
+set -euo pipefail
+
+# {{{ set_dir
+DIR="/mnt/mtwo/games/azeroth-core/wow-chat-neuron"
+if [[ -n "${1:-}" && -d "${1:-}" && -f "${1:-}/src/019-vocabulary.lua" ]]; then
+    DIR="$1"
+    shift
+fi
+# }}}
+
+# {{{ paths
+VOCABULARY_LUA="${DIR}/src/019-vocabulary.lua"
+OUTPUT="${DIR}/docs/vocabulary.txt"
+# }}}
+
+# {{{ read_flags
+# --stdout means "no path at all", which the Lua side reads as print-to-terminal.
+# Kept as an absent argument rather than a magic filename, so there is no path
+# that could ever be created by accident.
+case "${1:-}" in
+    --stdout)
+        OUTPUT=""
+        ;;
+    --out)
+        OUTPUT="${2:-}"
+        if [[ -z "${OUTPUT}" ]]; then
+            echo "vocabulary: --out needs a path after it" >&2
+            exit 2
+        fi
+        ;;
+    "")
+        ;;
+    *)
+        echo "vocabulary: no such option: ${1}" >&2
+        echo "  try --stdout, or --out <path>, or no arguments at all" >&2
+        exit 2
+        ;;
+esac
+# }}}
+
+# {{{ run
+exec luajit "${VOCABULARY_LUA}" "${DIR}" "${OUTPUT}"
+# }}}

@@ -44,7 +44,7 @@ Teleport.declaration = {
     -- standing there. Cold is the fallback that also works with the world down,
     -- and is the ONLY thing that works for an offline character either way.
     hands   = { "live", "cold" },
-    reversible = true,
+    kind    = "change",   -- reversible: apply captures the prior value first
     params  = {
         { name = "roster", type = "roster", required = true,
           describes = "Who to move: a name, a comma-separated list of names, "

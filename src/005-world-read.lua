@@ -350,13 +350,16 @@ function WorldRead.summary(handle)
         "SELECT"
      .. "  (SELECT COUNT(*) FROM characters)                  AS characters,"
      .. "  (SELECT COUNT(*) FROM characters WHERE online = 1) AS online,"
+     .. "  (SELECT COUNT(*) FROM characters c JOIN " .. handle.db_auth .. ".account a"
+     .. "     ON a.id = c.account WHERE c.online = 1 AND a.username LIKE ?)"
+     .. "                                                    AS bots_online,"
      .. "  (SELECT COUNT(*) FROM `groups`)                    AS parties,"
      .. "  (SELECT COUNT(DISTINCT account) FROM characters)   AS accounts,"
      .. "  (SELECT COUNT(*) FROM characters c JOIN " .. handle.db_auth .. ".account a"
      .. "     ON a.id = c.account WHERE a.username LIKE ?)    AS bots,"
      .. "  (SELECT COUNT(*) FROM characters c LEFT JOIN " .. handle.db_auth .. ".account a"
      .. "     ON a.id = c.account WHERE a.id IS NULL)         AS orphans",
-        { handle.bot_account_prefix .. "%" })
+        { handle.bot_account_prefix .. "%", handle.bot_account_prefix .. "%" })
 
     if not rows then
         return nil, why
@@ -369,6 +372,12 @@ function WorldRead.summary(handle)
     return {
         characters = tonumber(row.characters),
         online     = tonumber(row.online),
+
+        -- Split the same way the totals are: a bot logged in and a person
+        -- logged in are the only two numbers anybody watching a running world
+        -- actually wants.
+        bots_online = tonumber(row.bots_online),
+        players_online = tonumber(row.online) - tonumber(row.bots_online),
         parties    = tonumber(row.parties),
         accounts   = tonumber(row.accounts),
         bots       = tonumber(row.bots),

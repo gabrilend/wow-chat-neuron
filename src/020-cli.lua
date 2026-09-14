@@ -330,6 +330,89 @@ local function command_receipts(handle, flags, positional)
 end
 -- }}}
 
+-- {{{ command_atoms(handle, flags, positional)
+-- The pieces a conversation is made of, and what has been done to each.
+--
+-- An atom is a run of blocks between two signposts in the split transcript --
+-- however much sits there, because a signpost points a direction and says
+-- nothing about size. This is the only place they can be seen, and seeing them
+-- is the whole prerequisite for deciding what to cut.
+--
+--     neuron atoms 2026-09-06/013000-beef
+--     neuron atoms <id> --drop 4 --why "the table is huge"
+--     neuron atoms <id> --fold 4,5 --says "looked it up twice" --why "budget"
+--     neuron atoms <id> --keep 4
+--
+-- Nothing here rewrites a transcript. Every edit is one more line in an
+-- append-only log beside it, and reading replays that log from the start -- so
+-- what a conversation WAS is never up for revision, only what gets sent.
+local function command_atoms(handle, flags, positional)
+    local Transcript = dofile(handle.neuron_root .. "/src/067-transcript.lua")
+
+    local id = positional[1]
+    if not id then
+        fail("which conversation? Their ids are the date and time, as\n"
+          .. "  scripts/neuron receipts prints them and as the menu lists\n"
+          .. "  them -- for example 2026-09-06/013000-beef.")
+    end
+
+    -- {{{ numbers_in(text)
+    local function numbers_in(text)
+        local found = {}
+        for number in tostring(text or ""):gmatch("%d+") do
+            table.insert(found, tonumber(number))
+        end
+        return found
+    end
+    -- }}}
+
+    local why = flags.why or "from the command line"
+
+    for _, verb in ipairs({ "drop", "keep", "fold" }) do
+        if flags[verb] then
+            local ok, trouble = Transcript.prune(handle, id, verb,
+                numbers_in(flags[verb]), flags.says, why)
+            if not ok then fail(trouble) end
+            print(string.format("%s %s  (%s)", verb, flags[verb], why))
+            print("")
+        end
+    end
+
+    local atoms = Transcript.atoms(handle, id)
+
+    if #atoms == 0 then
+        fail("no conversation at " .. id .. ", or it has nothing in it yet.")
+    end
+
+    print(string.format("%-5s %-8s %6s %8s  %s",
+        "atom", "state", "blocks", "chars", "what is in it"))
+
+    local kept_characters, cut_characters = 0, 0
+
+    for _, atom in ipairs(atoms) do
+        print(string.format("%-5d %-8s %6d %8d  %s",
+            atom.section, atom.state, atom.blocks, atom.characters,
+            atom.says or table.concat(atom.markers, ",")))
+
+        if atom.state == "kept" then
+            kept_characters = kept_characters + atom.characters
+        else
+            cut_characters = cut_characters + atom.characters
+        end
+    end
+
+    print("")
+    print(string.format("%d characters kept, %d cut",
+        kept_characters, cut_characters))
+
+    -- Said rather than assumed: the count above is characters, and what a model
+    -- charges for is tokens. Four characters to a token is the usual rule of
+    -- thumb for English and it is a rule of thumb, not a measurement.
+    print(string.format("roughly %d tokens, at four characters each -- a rule "
+        .. "of thumb, not a count", math.floor(kept_characters / 4)))
+end
+-- }}}
+
 -- {{{ COMMANDS
 -- A dispatch table, not a chain of comparisons: looking up a subcommand should
 -- be one index, and a table is a thing that can be printed as help.
@@ -355,6 +438,9 @@ local COMMANDS = {
     receipts = { fn = command_receipts,
                  usage = "neuron receipts [--date YYYY-MM-DD] [--operation NAME]",
                  summary = "show what was done" },
+    atoms    = { fn = command_atoms,
+                 usage = "neuron atoms <id> [--drop N | --keep N | --fold N,M --says TEXT] [--why TEXT]",
+                 summary = "the pieces a conversation is made of, and cut some out" },
 }
 -- }}}
 
@@ -391,16 +477,110 @@ if not command_name or command_name == "help" or flags.help then
 end
 
 local command = COMMANDS[command_name]
-if not command then
-    io.stderr:write("no such command: " .. command_name .. "\n\n")
-    usage()
-    os.exit(2)
-end
 
 local ok, handle = pcall(Deployment.load)
 if not ok then
     fail("Cannot resolve which world to talk to:\n\n" .. tostring(handle))
 end
 
-command.fn(handle, flags, positional)
+if command then
+    command.fn(handle, flags, positional)
+    os.exit(0)
+end
+
+-- {{{ the registry, for anything the hand-written commands do not cover
+-- Every word in the registry, reachable by its verb, without a subcommand
+-- having been written for it.
+--
+-- The seven above are older than the registry and still work the way they
+-- always did (issue 702 replaces them). This is the path everything NEW
+-- arrives on -- so a word that is declared is a word that can be pulled the
+-- moment it exists, rather than when somebody remembers to add a function
+-- here.
+local Registry = dofile(neuron_root .. "/src/045-toolbox/047-registry.lua")
+
+local registry, registry_why = Registry.load(neuron_root)
+if not registry then
+    fail("The vocabulary would not load:\n" .. registry_why)
+end
+
+local operation
+for _, candidate in ipairs(registry.ordered) do
+    if candidate.verb == command_name or candidate.name == command_name then
+        operation = candidate
+    end
+end
+
+if not operation then
+    io.stderr:write("no such command: " .. command_name .. "\n\n")
+    usage()
+    io.stderr:write("\nand from the registry:\n")
+    for _, word in ipairs(registry.ordered) do
+        io.stderr:write(string.format("  %-10s %s\n    %s\n",
+            word.verb, word.summary, Registry.usage(word)))
+    end
+    os.exit(2)
+end
+
+-- Arguments come off the flags, coerced only as far as the declared type. The
+-- full coercion layer is issue 704; this handles the four plain types and
+-- leaves the resolving ones as the strings each operation already resolves
+-- itself.
+local arguments = {}
+for _, parameter in ipairs(operation.params) do
+    local given = flags[parameter.name]
+
+    if given ~= nil then
+        if parameter.type.name == "integer" then
+            arguments[parameter.name] = math.floor(tonumber(given) or 0)
+        elseif parameter.type.name == "number" then
+            arguments[parameter.name] = tonumber(given)
+        elseif parameter.type.name == "boolean" then
+            arguments[parameter.name] = (given == true or given == "true"
+                or given == "yes" or given == "1")
+        else
+            arguments[parameter.name] = given
+        end
+    elseif parameter.required then
+        fail(string.format("%s needs --%s\n  %s\n\n  %s",
+            operation.name, parameter.name, parameter.describes,
+            Registry.usage(operation)))
+    end
+end
+
+if operation.kind.name == "read" then
+    local answer, why = operation.run(handle, arguments)
+    if not answer then fail(why) end
+    print(answer.describes or "done")
+    os.exit(0)
+end
+
+local plan, plan_why = operation.plan(handle, arguments)
+if not plan then fail(plan_why) end
+
+print(operation.describe_plan and operation.describe_plan(plan)
+    or (#(plan.steps or {}) .. " steps"))
+
+if flags.plan then
+    print("")
+    print("(--plan given; nothing was changed)")
+    os.exit(0)
+end
+
+-- Anything that cannot be undone needs saying yes to, in the same breath.
+if operation.kind.name == "final" and not flags.confirm then
+    print("")
+    fail("This cannot be undone. Pass --confirm to mean it.")
+end
+
+local Liveness = dofile(neuron_root .. "/src/004-liveness.lua")
+local state = Liveness.probe(handle)
+
+local receipt = operation.apply(handle, plan, state)
+
+print("")
+print(Receipts.describe(receipt))
+
+if receipt.outcome ~= "complete" then os.exit(1) end
+-- }}}
 -- }}}

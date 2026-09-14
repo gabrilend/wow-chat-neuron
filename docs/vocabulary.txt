@@ -1,0 +1,313 @@
+================================================================================
+  NEURON VOCABULARY -- THE CLOSED SET, AS DECLARATIONS
+================================================================================
+
+A declaration is the whole of what neuron knows about one word. It is
+written once, in the file that implements the operation, and three
+surfaces are drawn from it, none of them written by hand:
+
+    the command line    one subcommand, its flags, its usage text
+    the tool schema     one JSON Schema entry handed to a model
+    the catalogue       this table
+
+The rule that makes it worth doing: an operation cannot exist as a
+command without existing as a tool. There is no back door where a person
+reaches something a model cannot, and no tool a person cannot first try
+by hand. When the asking half is built, it is handed the same set of
+levers that was already there, and it does not get a private one.
+
+Three of the words below are built and have been run against a live
+world: character.teleport, character.return and character.retire. The
+rest are shown at declaration level because that is the level at which a
+vocabulary has to make sense as a whole. Names that sort together, hands
+chosen by one rule, and a parameter that means the same thing everywhere
+it appears are not decisions you can make one operation at a time.
+
+--------------------------------------------------------------------------------
+  LEGEND
+--------------------------------------------------------------------------------
+
+hands   how this word reaches the world, in preference order. The first
+        hand that is up is the one used; if none are, it refuses and says
+        which service is down.
+
+          cold   a database write. Works while the worldserver is down,
+                 and is the only thing that reaches an offline character.
+          live   a game master command over SOAP. Instant and visible,
+                 and the only thing that reaches an online character
+                 without the server writing over it on its next save.
+          res    a script installed into the running world, which stays
+                 there and keeps deciding after the command has returned.
+          none   neuron answering about itself. No world is touched and
+                 none needs to be running.
+
+k       what running it costs.
+
+          ?      reads only. No receipt, no apply, safe at any moment.
+          +      changes the world, and a receipt can put it back.
+          !      changes the world, and nothing can put it back.
+
+types   the four plain ones arrive as text from a terminal and as parsed
+        JSON from a model, and are the same Lua value by the time any
+        operation sees them. The four named ones do real work in
+        coercion, turning a word a person would say into rows:
+
+          str    text                int   whole number
+          bool   true or false       list  several of a thing
+
+          rost   a roster: one name, a comma-separated list of names, or
+                 a query such as 'bots hunters 18-20'
+          plac   a place-book name, resolved to a map and four numbers
+          item   a named item list, or a list of item ids
+          rcpt   the id of something already done, from world.receipts
+
+          x?     that parameter may be left out
+
+--------------------------------------------------------------------------------
+  THE SET
+--------------------------------------------------------------------------------
+
+name                  hands     k  parameters
+--------------------- --------- - ---------------------------------------------
+
+READING THE WORLD   [phase 1 -- Reach]
+
+  Nothing here alters anything, which is why it is first and why every one
+  of these is safe to hand a model without a gate in front of it. These are
+  also the words a person reaches for immediately before a word that does
+  change something: seeing who a roster resolves to is how somebody avoids
+  moving the wrong forty characters.
+
+world.status          cold live ?  --
+world.places          cold      ?  fragment:str? limit:int?
+world.roster          cold      ?  roster:rost limit:int? orphans:bool?
+world.character       cold      ?  character:str
+world.groups          cold      ?  roster:rost?
+world.online          live      ?  --
+world.dangling        cold      ?  --
+world.receipts        cold      ?  date:str? operation:str? limit:int?
+world.creatures       cold      ?  type:str? level:int? name:str? rank:str?
+                                   limit:int?
+
+DISPLACEMENT   [phase 2 -- Anyone can be anywhere]
+
+  Position is four numbers and a map. Every word here writes all five or
+  refuses, because coordinates without the map put a character at the right
+  numbers on the wrong continent, which looks exactly like nothing having
+  happened. All of these are reversible because all of them capture where
+  everybody was standing before they moved.
+
+character.teleport    live cold +  roster:rost place:plac
+character.scatter     live cold +  roster:rost place:plac radius:int? shape:str?
+character.summon      live      +  roster:rost target:str
+character.homebind    cold      +  roster:rost place:plac
+character.return      cold      +  receipt:rcpt
+
+OUTFITTING   [phase 3 -- Anyone can be wearing anything]
+
+  Taking gear away and putting it back are two words, not one word with a
+  direction flag, because the putting-back reads a receipt and the taking
+  away writes one. What strip removes goes into holding rather than being
+  destroyed, which is the only reason reclothe can exist at all.
+
+item.lists            cold      ?  fragment:str?
+character.strip       cold      +  roster:rost slots:list?
+character.equip       cold      +  roster:rost items:item
+character.give        live cold +  roster:rost item:str count:int?
+character.money       cold      +  roster:rost copper:int
+character.reclothe    cold      +  receipt:rcpt
+
+COMPANY   [phase 4 -- Nobody is alone]
+
+  A group is a thing that outlives its members: the garrison holds a place
+  rather than holding a list of characters, so a guard who dies is replaced
+  without the post being re-declared. Retiring characters is the one word in
+  this section that nothing can undo, and it is marked accordingly.
+
+party.assemble        live cold +  roster:rost leader:str?
+party.disband         live cold +  roster:rost
+character.generate    cold      +  count:int class:str? level:int? faction:str?
+garrison.post         res cold  +  roster:rost place:plac spacing:int?
+garrison.recall       res cold  +  place:plac
+character.retire      cold      !  roster:rost confirm:bool?
+
+RENEWAL   [phase 5 -- Change without replacement]
+
+  A character who is levelled is still the same character; a character who
+  is deleted and remade is not, and everything that referred to them now
+  refers to nobody. That distinction is the whole phase. Reclass is marked
+  final because a class change discards talents, spells and gear the old
+  class could hold and the new one cannot.
+
+character.level       live cold +  roster:rost level:int
+character.respec      live cold +  roster:rost
+character.rename      cold      +  character:str name:str
+character.restyle     cold      +  roster:rost vector:str
+character.reclass     cold      !  character:str class:str confirm:bool?
+
+CONSTRUCTION   [phase 6 -- Architecture the map files never had]
+
+  Geometry placed by hand: a wall is a row of the same object at a spacing
+  somebody chose. These take the resident hand first because a structure
+  that appears while people are standing in it is the point, and fall back
+  to cold so a build survives the world being down.
+
+structure.build       res cold  +  blueprint:str place:plac facing:int?
+structure.remove      res cold  +  receipt:rcpt
+world.spawn           res cold  +  creature:int place:plac count:int?
+                                   spread:int? permanent:bool?
+world.clear           cold      !  map:str confirm:bool?
+
+THE TOOLBOX ITSELF   [phase 7 -- The vocabulary is a thing you can hold]
+
+  Neuron answering about neuron. These take no hand at all -- the world is
+  not touched and does not need to be up. They exist because a model that
+  picks a word that does not exist has to be told what does, and a list of
+  near matches in an error message is the only thing standing between it
+  and guessing again.
+
+neuron.catalogue      none      ?  section:str? format:str?
+neuron.explain        none      ?  operation:str
+
+NARRATION   [phase 10 -- Changes become story]
+
+  A receipt is a record; a story is a record somebody wants to read. These
+  read the receipt log and nothing else, which is why they are safe and why
+  they work with the world down. The voice parameter selects a register,
+  not a set of facts -- the facts are whatever the receipt says.
+
+story.receipt         cold      ?  receipt:rcpt voice:str?
+story.session         cold      ?  date:str? voice:str?
+story.character       cold      ?  character:str voice:str?
+
+PORTAGE   [phase 11 -- What was made here can be made again]
+
+  The deployment is not neuron's to build, so exporting it is exporting a
+  description of what was done to it rather than a copy of it. Import is
+  final because it writes over a world that already has characters in it,
+  and there is no receipt for a world you have not read yet.
+
+deployment.check      cold live ?  --
+deployment.export     cold      ?  path:str parts:list?
+deployment.import     cold      !  path:str confirm:bool?
+
+43 words, 9 sections.
+
+--------------------------------------------------------------------------------
+  ONE OF THEM IN FULL
+--------------------------------------------------------------------------------
+
+The table is the shadow. This is the thing casting it -- the declaration
+as it is actually written, today, at the top of src/013-teleport.lua:
+
+    Teleport.declaration = {
+        name    = "character.teleport",
+        summary = "Move a roster of characters to a named place.",
+        hands   = { "live", "cold" },
+        reversible = true,
+        params  = {
+            { name = "roster", type = "roster", required = true,
+              describes = "Who to move: a name, a comma-separated list "
+                       .. "of names, or a query like 'bots hunters 18-20'." },
+            { name = "place", type = "place", required = true,
+              describes = "Where to move them: a named location such "
+                       .. "as 'ratchet'." },
+        },
+    }
+
+The describes field is not documentation. It is the sentence a model
+reads when it is deciding whether this is the word it wants, and it is
+the only thing telling it that a roster may be a query rather than a
+name. A parameter described as "the roster" teaches nothing; a parameter
+described with an example of the query language teaches the whole
+feature. Write it for a reader who has never seen this project.
+
+--------------------------------------------------------------------------------
+  WHAT IT RENDERS INTO
+--------------------------------------------------------------------------------
+
+On the command line, one subcommand. The flags are the parameter names,
+the usage line is built from which of them are required, and --plan is
+added by the dispatcher rather than by the operation, because every word
+marked + or ! gets it and none of them should have to ask:
+
+    neuron teleport --roster <rost> --place <plac> [--plan]
+      Move a roster of characters to a named place.
+
+For a model, one entry in a tool list. Note what happens to the two
+named types: they become plain strings, because a model cannot hold a
+resolved roster and should not try. It says the words a person would say
+and coercion turns them into rows on the way in:
+
+    {
+      "name": "character_teleport",
+      "description": "Move a roster of characters to a named place.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "roster": { "type": "string", "description":
+            "Who to move: a name, a comma-separated list of names, or
+             a query like 'bots hunters 18-20'." },
+          "place":  { "type": "string", "description":
+            "Where to move them: a named location such as 'ratchet'." }
+        },
+        "required": ["roster", "place"]
+      }
+    }
+
+The dot became an underscore. Tool names in the API are restricted to
+letters, digits and underscores, so the registry name and the tool name
+differ by exactly that substitution, applied in one place and reversed
+in one place. It is written down here because a mapping that lives only
+in code is a mapping somebody will reimplement slightly differently.
+
+--------------------------------------------------------------------------------
+  RULES THAT HOLD ACROSS THE WHOLE SET
+--------------------------------------------------------------------------------
+
+1.  A name is subject.verb, and the subject is what is being acted on,
+    never the machinery doing it. character.teleport, not teleport, not
+    move.character, not cold.reposition. Sorting the table then sorts by
+    what is being touched, which is how somebody actually looks for a
+    word: they know what they want to change before they know the verb.
+
+2.  Hands are a preference, not a requirement. An operation states the
+    order it would like and the dispatcher takes the first that is up.
+    The order is a real decision per operation: teleport prefers live
+    because the change is instant and visible, while relevelling forty
+    offline bots prefers cold, because forty commands over SOAP is forty
+    round trips and one UPDATE is one.
+
+3.  Everything marked ! takes a confirm boolean. This is not politeness.
+    The parameter appearing in the schema is what stops a model from
+    reaching an irreversible word in a single step, because it must ask
+    for the confirmation, which means saying out loud what it is about
+    to do while somebody is reading.
+
+4.  A parameter name means the same thing everywhere. roster is always
+    who, place is always where, receipt is always which past act. A word
+    that needed roster to mean something else would be the wrong word.
+
+5.  Reads have no apply and write no receipt. They declare a single run
+    instead of plan and apply, and --plan on one of them is refused
+    rather than quietly treated as the same thing, because a flag that
+    silently does nothing teaches somebody the wrong lesson about what
+    the flag means on the words where it matters.
+
+6.  Optional parameters state their default in the declaration, never
+    inside the function. Both surfaces have to show the default, and a
+    default hidden in a function body can only be shown by someone
+    remembering to copy it, which is a thing that stops happening.
+
+7.  Refusals are values and there are exactly four kinds: unknown,
+    argument, unavailable, refused. Small enough that the asking loop can
+    turn any of them into a tool result with useful text, and every one
+    of them names the thing that was wrong.
+
+================================================================================
+  Generated by src/019-vocabulary.lua, through scripts/vocabulary.
+  Do not edit this file; edit the declarations and run it again.
+  Issue 705 replaces the sketch in that file with the live registry,
+  after which this document describes what exists rather than what is
+  intended, and the difference stops needing to be remembered.
+================================================================================

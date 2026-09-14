@@ -35,9 +35,9 @@ Return.declaration = {
     name    = "character.return",
     summary = "Put characters back where a receipt says they were.",
     hands   = { "cold" },
-    reversible = true,
+    kind    = "change",   -- reversible: apply captures the prior value first
     params  = {
-        { name = "receipt", type = "string", required = true,
+        { name = "receipt", type = "receipt", required = true,
           describes = "The id of the receipt to reverse, as shown by 'neuron receipts'." },
     },
 }
