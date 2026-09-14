@@ -1,0 +1,537 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>neuron — setting up a model</title>
+<style>
+/* ---------------------------------------------------------------------------
+   The front door. One level above everything else.
+
+   It assumes nothing. Not that a server is running, not that a database
+   answered, not that whoever is reading knows a script name. Every row says
+   what the thing IS before it says whether it is up, because "authserver:
+   down" tells somebody who already knows nothing they did not.
+
+   Nothing is fetched. No fonts, no icons, no scripts from anywhere -- the
+   machine this drives may have no internet, and so must the page that drives
+   it.
+   --------------------------------------------------------------------------- */
+
+:root {
+  --ink:        #d8d2c4;
+  --dim:        #8a8375;
+  --gold:       #ffd100;
+  --gold-deep:  #a67c00;
+  --gold-edge:  #6b4f00;
+  --frame:      #0a0a0c;
+  --frame-soft: #14141a;
+
+  --up:      #40ff40;
+  --down:    #ff6040;
+  --waiting: #ffff00;
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; margin: 0; }
+
+body {
+  background: var(--frame);
+  color: var(--ink);
+  font: 14px/1.55 ui-monospace, "DejaVu Sans Mono", Menlo, Consolas, monospace;
+  padding: 28px 20px 60px;
+}
+
+.sheet { max-width: 860px; margin: 0 auto; }
+
+h1 {
+  font-size: 22px; font-weight: 600; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--gold);
+  margin: 0 0 2px;
+}
+
+.whereabouts { color: var(--dim); font-size: 12px; margin-bottom: 28px; }
+.whereabouts b { color: var(--ink); font-weight: 600; }
+/* The deployment path and the profile names are things you press, and at this
+   size a full-height button reads as a form rather than as a line of prose. */
+.whereabouts button { margin: 0 2px; padding: 3px 9px; font-size: 11.5px; }
+.override { color: var(--waiting); }
+
+h2 {
+  font-size: 12px; font-weight: 600; letter-spacing: .18em;
+  text-transform: uppercase; color: var(--gold-deep);
+  margin: 32px 0 10px; padding-bottom: 6px;
+  border-bottom: 1px solid var(--gold-edge);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 14px 1fr auto;
+  gap: 12px; align-items: start;
+  padding: 11px 0;
+  border-bottom: 1px solid #1c1c22;
+}
+.row:last-child { border-bottom: 0; }
+
+.lamp { font-size: 13px; line-height: 1.5; }
+.lamp.on  { color: var(--up); }
+.lamp.off { color: var(--down); }
+.lamp.warn { color: var(--waiting); }
+/* No class at all: a dotted circle, meaning nobody has asked yet. Distinct from
+   both green and red, because "unknown" is a real third answer and showing it
+   as red would be a lie about something that may well be running. */
+.lamp { color: var(--dim); }
+
+.name { color: var(--ink); font-weight: 600; }
+.name .port { color: var(--dim); font-weight: 400; margin-left: 8px; font-size: 12px; }
+.what { color: var(--dim); font-size: 12.5px; margin-top: 2px; }
+
+.buttons { display: flex; gap: 6px; align-items: center; }
+
+button {
+  font: inherit; font-size: 12px;
+  background: var(--frame-soft);
+  color: var(--gold);
+  border: 1px solid var(--gold-edge);
+  padding: 5px 12px; cursor: pointer;
+  letter-spacing: .06em;
+}
+button:hover:not(:disabled) { background: #1e1e26; border-color: var(--gold-deep); }
+button:disabled { color: #4a463d; border-color: #26262c; cursor: default; }
+button.quiet { color: var(--dim); }
+button.chosen { color: var(--gold); border-color: var(--gold-deep);
+                background: #1e1e26; }
+
+/* Held down.
+   :active is the browser's own answer to "is a mouse button currently down on
+   this element" -- it applies from mousedown until release and it clears
+   itself, including when the pointer is dragged off, which a class toggled by
+   javascript would get wrong. It costs no script at all.
+   The border is the SELECTED border, so a press reads as reaching for that
+   state; the interior is lit rather than dimmed, so the press reads as
+   pressure rather than as being switched off. Nothing else on this page
+   changed the moment somebody clicked. */
+button:active:not(:disabled) {
+  border-color: var(--gold);
+  background: var(--gold-edge);
+  color: #fff;
+  transform: translateY(1px);
+}
+
+a { color: var(--gold); text-decoration: none; border-bottom: 1px solid var(--gold-edge); }
+a:hover { color: #fff; }
+
+.said {
+  white-space: pre-wrap;
+  background: var(--frame-soft);
+  border-left: 2px solid var(--gold-edge);
+  padding: 10px 14px; margin: 10px 0 0;
+  font-size: 12.5px; color: var(--ink);
+}
+.said.bad  { border-left-color: var(--down); }
+.said.done { border-left-color: var(--up); }
+
+.panel { position: relative; margin-top: 10px; }
+.panel .shut {
+  position: absolute; top: 6px; right: 6px; z-index: 2;
+  padding: 1px 8px; font-size: 14px; line-height: 1.2;
+  background: var(--frame); color: var(--dim);
+}
+.panel .shut:hover { color: var(--gold); border-color: var(--gold-deep); }
+.panel .said, .panel .log { margin-top: 0; }
+
+.keyline { display: flex; gap: 6px; margin-top: 8px; }
+.keyline input {
+  flex: 1; font: inherit; font-size: 12px;
+  background: #08080a; color: var(--ink);
+  border: 1px solid #26262c; padding: 5px 9px;
+}
+.keyline input:focus { outline: none; border-color: var(--gold-edge); }
+
+/* The dim is the point: everything behind it stops asking for attention. */
+.veil {
+  position: fixed; inset: 0; background: rgba(0,0,0,.72);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 10; transition: opacity .45s;
+}
+/* `hidden` sets display:none in the browser's own stylesheet, and ANY author
+   rule setting display beats it -- so `display:flex` above made hidden mean
+   nothing, and the page loaded with an empty veil over it whose buttons had no
+   handlers yet. Author-level rule, restoring what the attribute promises. */
+.veil[hidden] { display: none; }
+.veil.going { opacity: 0; pointer-events: none; }
+
+/* Where else you can go. Anchored under the button that opens it. */
+.menu {
+  position: absolute; z-index: 12;
+  background: var(--frame-soft); border: 1px solid var(--gold-edge);
+  padding: 6px 0; min-width: 200px;
+}
+.menu a {
+  display: block; padding: 7px 16px; border: 0;
+  color: var(--gold); font-size: 12.5px; letter-spacing: .04em;
+}
+.menu a:hover { background: #1e1e26; color: #fff; }
+/* The page you are already on. Listed rather than omitted, so the menu reads
+   the same everywhere and can be copied without editing. */
+.menu a.here { color: var(--dim); }
+.menu a.here:hover { background: none; color: var(--dim); cursor: default; }
+
+/* The library opens over the page rather than beside it. It is reference, read
+   once and closed, and a column that pushed the page sideways would make the
+   thing you were doing move. */
+/* ANCHORED AT THE TOP, not centred.
+   A centred panel moves when its contents change, so expanding a section
+   slides everything you were reading upward -- and the thing you clicked ends
+   up somewhere else. Pinned to the top, it only ever grows downward. */
+.veil.top { align-items: flex-start; padding-top: 40px; }
+
+.drawer {
+  background: var(--frame); border: 1px solid var(--gold-edge);
+  padding: 24px 28px; width: min(820px, calc(100% - 40px));
+  max-height: calc(100% - 80px); overflow-y: auto;
+  position: relative;
+}
+.drawer details { border-bottom: 1px solid #1c1c22; }
+.drawer details:last-of-type { border-bottom: 0; }
+.drawer summary {
+  cursor: pointer; list-style: none;
+  font-size: 12px; font-weight: 600; letter-spacing: .18em;
+  text-transform: uppercase; color: var(--gold-deep);
+  padding: 14px 0 10px;
+}
+.drawer summary::-webkit-details-marker { display: none; }
+.drawer summary::before { content: '\25b8  '; color: var(--gold-edge); }
+.drawer details[open] > summary::before { content: '\25be  '; }
+.drawer summary:hover { color: var(--gold); }
+.drawer summary .count { color: var(--dim); font-weight: 400;
+                         letter-spacing: 0; text-transform: none;
+                         font-size: 12px; margin-left: 8px; }
+.drawer h3 {
+  font-size: 12px; font-weight: 600; letter-spacing: .18em;
+  text-transform: uppercase; color: var(--gold-deep);
+  margin: 28px 0 4px; padding-bottom: 6px;
+  border-bottom: 1px solid var(--gold-edge);
+}
+.drawer .shut {
+  position: absolute; top: 10px; right: 12px;
+  background: none; border: 0; color: var(--dim); font-size: 20px;
+  padding: 0 6px; line-height: 1;
+}
+.drawer .shut:hover { color: var(--gold); }
+
+.dialog {
+  background: var(--frame-soft); border: 1px solid var(--gold-edge);
+  padding: 22px 24px; max-width: 520px; width: calc(100% - 40px);
+}
+.dialog h3 {
+  margin: 0 0 10px; font-size: 13px; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--gold);
+}
+.dialog p { margin: 0 0 14px; color: var(--dim); font-size: 12.5px; }
+.dialog .steps {
+  font-size: 12.5px; margin: 14px 0; min-height: 20px;
+  white-space: pre-wrap; color: var(--ink);
+}
+.dialog .steps .done { color: var(--up); }
+.dialog .steps .fail { color: var(--down); }
+
+@keyframes turn { to { transform: rotate(360deg); } }
+.spinner {
+  display: inline-block; width: 10px; height: 10px; margin-right: 8px;
+  border: 2px solid var(--gold-edge); border-top-color: var(--gold);
+  border-radius: 50%; animation: turn .8s linear infinite;
+  vertical-align: -1px;
+}
+
+pre.log {
+  white-space: pre; overflow-x: auto;
+  background: #08080a; border: 1px solid #1c1c22;
+  padding: 12px; margin: 10px 0 0;
+  font-size: 11.5px; color: var(--dim);
+  max-height: 340px;
+}
+
+/* A heading INSIDE a section, for when one section holds two unrelated
+   things. The remote model and the local one were in one list, which read as
+   though the remote one somehow ran on the local one. */
+h3.sub {
+  font-size: 11px; font-weight: 600; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--dim);
+  margin: 18px 0 2px;
+}
+h3.sub:first-child { margin-top: 4px; }
+
+.words .row { grid-template-columns: 16px 1fr; }
+.glyph { color: var(--gold-deep); font-weight: 600; }
+.glyph.final { color: var(--down); }
+.params { color: var(--dim); font-size: 12px; }
+
+
+
+
+.note { color: var(--dim); font-size: 12px; margin-top: 8px; }
+</style>
+<style>
+.sheet { max-width: 760px; }
+/* An error, quoted as neuron says it. Monospace and gold so it is findable by
+   eye when somebody is scanning for the words in front of them. */
+h3.err {
+  font-size: 13px; font-weight: 600; letter-spacing: 0; text-transform: none;
+  color: var(--gold); margin: 26px 0 4px; padding-bottom: 0; border-bottom: 0;
+}
+h3.err::before { content: '\201c'; color: var(--dim); }
+h3.err::after  { content: '\201d'; color: var(--dim); }
+h3.err + p { color: var(--ink); margin: 0 0 8px; }
+p  { color: var(--ink); font-size: 13.5px; line-height: 1.7; }
+li { color: var(--ink); font-size: 13.5px; line-height: 1.7; margin: 6px 0; }
+code { color: var(--gold); font-size: 12.5px; }
+pre.cmd {
+  background: #08080a; border-left: 2px solid var(--gold-edge);
+  padding: 12px 14px; margin: 12px 0; font-size: 12.5px;
+  color: var(--ink); overflow-x: auto; white-space: pre;
+}
+.aside { color: var(--dim); font-size: 12.5px; line-height: 1.7;
+         border-left: 2px solid #26262c; padding-left: 14px; margin: 16px 0; }
+table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 12px; }
+th { text-align: left; color: var(--gold-deep); font-weight: 600;
+     text-transform: uppercase; letter-spacing: .12em; font-size: 11px;
+     padding: 8px 12px 8px 0; border-bottom: 1px solid var(--gold-edge); }
+td { padding: 9px 12px 9px 0; border-bottom: 1px solid #1c1c22;
+     color: var(--ink); vertical-align: top; }
+td.v { color: var(--dim); word-break: break-all; }
+</style>
+</head>
+<body>
+<div class="sheet">
+
+  <div class="buttons" style="float:right">
+    <button class="quiet" id="hamburger" title="everywhere else">&#9776;</button>
+  </div>
+  <h1>setting up a model</h1>
+  <div class="whereabouts">connecting neuron to something that can think</div>
+
+  <h2>two roles</h2>
+
+  <p>neuron talks to two models, and they are told apart by what they are
+  <i>for</i> rather than by where they run.</p>
+
+  <p>The <b>game master</b> runs the world. It spawns creatures, moves
+  characters, reads what is out there, and writes the encounters somebody is
+  about to walk into. It has the whole world vocabulary and it is the one worth
+  paying for.</p>
+
+  <p>The <b>configuration assistant</b> sets neuron up. It can change where
+  thinking gets sent, read the project&rsquo;s own source, and write
+  credentials. It can change nothing in the world &mdash; not a character, not
+  a creature, not a place &mdash; and that is the point rather than a
+  limitation.</p>
+
+  <p>The reason for the split is what you need at the moment something is
+  broken. If the API key is wrong, or the endpoint moved, or the account has no
+  credit, the game master cannot help you fix any of it, because fixing it is
+  exactly the thing it cannot do. So the assistant is a life raft, and a life
+  raft that needed the thing that is broken would not be one.</p>
+
+  <div class="aside">Which is why the assistant is usually the local one. Not a
+  rule &mdash; either role can point anywhere &mdash; but a model running on
+  your own machine needs no credential and no network, so it is available in
+  precisely the situation the assistant exists for. It is not a general-purpose
+  cheap model, though: its whole vocabulary is neuron&rsquo;s own settings, and
+  it can do nothing else with it.</div>
+
+  <h2>pointing them somewhere</h2>
+
+  <p>Both roles take the same three things: an address, a model name, and
+  &mdash; if the service wants one &mdash; a key. Anything that speaks either
+  the Anthropic message format or Ollama&rsquo;s <code>/api/chat</code> will
+  work, and that covers most of what is out there.</p>
+
+  <table>
+    <tr><th>service</th><th>address</th><th>a model name</th><th>key</th></tr>
+    <tr>
+      <td>Claude</td>
+      <td class="v">https://api.anthropic.com/v1/messages</td>
+      <td class="v">claude-opus-5</td>
+      <td class="v">yes</td>
+    </tr>
+    <tr>
+      <td>OpenAI</td>
+      <td class="v">https://api.openai.com/v1/chat/completions</td>
+      <td class="v">gpt-5</td>
+      <td class="v">yes</td>
+    </tr>
+    <tr>
+      <td>Gemini</td>
+      <td class="v">https://generativelanguage.googleapis.com/v1beta/openai/chat/completions</td>
+      <td class="v">gemini-2.5-pro</td>
+      <td class="v">yes</td>
+    </tr>
+    <tr>
+      <td>Ollama</td>
+      <td class="v">http://127.0.0.1:11434/api/chat</td>
+      <td class="v">qwen2.5</td>
+      <td class="v">no</td>
+    </tr>
+  </table>
+
+  <p>The key goes in <code>secrets/api.key</code>, and the keys section of the
+  main menu will write it for you. A local model needs none, and the row says
+  so.</p>
+
+  <div class="aside">neuron speaks two wire formats: Anthropic&rsquo;s, and
+  Ollama&rsquo;s. Services that offer an OpenAI-compatible endpoint &mdash;
+  which is most of them, Gemini included &mdash; are close enough in shape that
+  the Ollama dialect reaches them. If one does not answer, that is the first
+  thing to suspect.</div>
+
+  <h2>running one yourself</h2>
+
+  <p>Anything that speaks Ollama&rsquo;s <code>/api/chat</code> will do.
+  Ollama itself is the shortest path; llama.cpp&rsquo;s server speaks the same
+  shape and neuron will move to it.</p>
+
+  <p><b>One.</b> Install it, from <code>ollama.com/download</code> or your
+  package manager.</p>
+
+  <p><b>Two.</b> Start it, and leave it running.</p>
+  <pre class="cmd">ollama serve</pre>
+
+  <p><b>Three.</b> Pull a model. Any of them will do something; how well is a
+  gradient rather than a yes or no.</p>
+
+  <pre class="cmd">ollama pull qwen2.5
+ollama pull llama3.1</pre>
+
+  <h2>how well a model can call a tool</h2>
+
+  <p>A tool call is properly formatted text, usually shaped like JSON. The
+  model emits characters, and something watching the stream recognises an
+  agreed shape and runs it.</p>
+
+  <p>neuron reads both: the field when a server provides one, and the text when
+  it does not. So the question is not whether a model <i>can</i>, it is how
+  reliably. Three tiers, best first.</p>
+
+  <ul>
+    <li><b>Built-in tool calling.</b> The server has a template for this model
+      and returns calls in their own field. Nothing has to be recognised in
+      prose, so nothing is missed. qwen2.5, qwen3, llama3.1, llama3.2,
+      llama3.3, mistral-nemo, mistral-small, command-r and hermes3 are here.</li>
+    <li><b>Trained on the shape, without the plumbing.</b> The model has read
+      enough tool calls to write one, and the server hands it back as ordinary
+      text. neuron finds it anyway &mdash; balanced-brace scanning, several
+      wrappers handled. Older llama2 builds land here and work, with the
+      occasional retry.</li>
+    <li><b>No idea what a tool call is.</b> It writes about the tool instead of
+      calling it, or writes something JSON-shaped that means nothing. Every
+      turn is a coin flip.</li>
+  </ul>
+
+  <p>Anything with <code>embed</code>, <code>bge</code>, <code>rerank</code> or
+  <code>nomic</code> in its name is in none of these tiers: those turn text into
+  vectors and cannot hold a conversation at all. neuron marks them in the model
+  picker so they cannot be chosen by accident.</p>
+
+  <div class="aside">Size matters more than tier does. A three-billion
+  parameter model that <i>can</i> call tools often writes &ldquo;I will change
+  the timeout to 15 seconds&rdquo; instead of changing it &mdash; it knows the
+  shape and does not reach for it. Seven or eight billion parameters is where
+  the model starts performing well.</div>
+
+  <h2>pointing neuron at it</h2>
+
+  <p>Under <b>services</b> on the main menu, <b>ollama</b> starts and stops
+  like the game servers do, on whatever address it is configured for. Its lamp
+  is how you know it is running, and its log is where it says why it is not.</p>
+
+  <p>Under <b>chat</b>, the assistant has two rows. <b>model</b> lists what your
+  server actually has and marks which of them can call tools &mdash; that list
+  comes from the server itself, so it cannot name something you have not
+  pulled. <b>address</b> sets where the server is, including the path it
+  answers on, and starting ollama from the menu binds exactly that address, so
+  the two cannot drift.</p>
+
+  <h2>when it goes wrong</h2>
+
+  <p>What neuron says, and what to do about it.</p>
+
+  <h3 class="err">not answering</h3>
+  <p>Nothing accepted a connection at that address.</p>
+  <p>Check that <code>ollama serve</code> is running, and that it is running
+  where neuron is looking. Ollama binds <code>127.0.0.1:11434</code> unless
+  <code>OLLAMA_HOST</code> says otherwise, and a server bound to loopback on
+  another machine cannot be reached from this one at all &mdash; it needs
+  <code>OLLAMA_HOST=0.0.0.0</code>. Use the <b>address</b> button to point
+  neuron somewhere else.</p>
+
+  <h3 class="err">model &lsquo;x&rsquo; not found, try pulling it first</h3>
+  <p>The server is running and does not have that model.</p>
+  <p><code>ollama list</code> shows what it does have. Either pull the one you
+  asked for, or press <b>model</b> on the menu and choose from what is
+  actually there &mdash; that list comes from the server itself, so it cannot
+  name something that is missing.</p>
+
+  <h3 class="err">the request took too long</h3>
+  <p>The model did not finish inside the timeout.</p>
+  <p>First generation after a pull is slow: the weights are being read from
+  disk. If it is slow every time, the model does not fit in your graphics
+  card&rsquo;s memory and is spilling into system memory, which costs an order
+  of magnitude &mdash; <code>nvidia-smi</code> or <code>rocm-smi</code> will
+  show it. Either pick a smaller model or a heavier quantisation. The timeout
+  itself is <code>timeout_seconds</code> in the local conversation&rsquo;s own
+  levers.</p>
+
+  <h3 class="err">Stopped after 12 rounds of tool calls without a final answer</h3>
+  <p>The model kept calling tools and never said anything.</p>
+  <p>Usually a small model repeating one call. neuron answers a repeat from
+  what it already worked out and stops the moment a whole round is repeats, so
+  this is capped rather than endless &mdash; but it means the model is not
+  reading its own results. A larger model does not do it.</p>
+
+  <h3 class="err">it answers in prose about calling a tool</h3>
+  <p>Not an error message; it simply never calls anything.</p>
+  <p>The model is in the third tier above. It is worth one retry &mdash; they
+  are inconsistent rather than incapable &mdash; and then worth changing the
+  model.</p>
+
+  <h3 class="err">everything is unreachable</h3>
+  <p>The remote model, the database and the servers are all down.</p>
+  <p>That is what this model is for. Open a local conversation from the main
+  menu and ask it; it needs none of them.</p>
+
+</div>
+
+<div class="menu" id="hamburger-menu" hidden>
+  <a href="/">main menu</a>
+  <a href="/?library=1">library</a>
+  <a href="#" class="here">setting up a model</a>
+  <a href="/server">setting up the game server</a>
+</div>
+
+<script>
+// The same hamburger as the main menu, copied rather than shared, because the
+// two pages share no code and a script tag between them would be one more thing
+// that can fail to load. The entry for the page you are on does nothing.
+document.addEventListener('click', event => {
+  const menu = document.getElementById('hamburger-menu');
+
+  if (event.target.id === 'hamburger') {
+    if (!menu.hidden) { menu.hidden = true; return; }
+    const at = event.target.getBoundingClientRect();
+    menu.style.top  = (at.bottom + window.scrollY + 6) + 'px';
+    menu.style.left = (at.left + window.scrollX) + 'px';
+    menu.hidden = false;
+    return;
+  }
+
+  if (!menu.hidden) menu.hidden = true;
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') document.getElementById('hamburger-menu').hidden = true;
+});
+</script>
+</body>
+</html>
