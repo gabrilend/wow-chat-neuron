@@ -16,18 +16,29 @@
 --   those varies and matching on the serialized form breaks unpredictably.
 --
 -- Lua's table has no way to distinguish an empty array from an empty object, so
--- an explicit marker is provided for the cases where the difference reaches the
--- wire. Guessing is how a tool call arrives with `{}` where the API wanted `[]`.
+-- a table can be MARKED as a list and stays one when it empties out. Guessing is
+-- how a tool call arrives with `{}` where the API wanted `[]`.
 --------------------------------------------------------------------------------
 
 local Json = {}
 
--- {{{ Json.EMPTY_ARRAY
--- A sentinel meaning "an array with nothing in it".
+-- {{{ Json.ARRAY / Json.array(list)
+-- The same fact, said about a table that is not empty YET.
 --
--- Without it, `{}` encodes as `{}` (an object), because an empty Lua table looks
--- exactly like an empty Lua table. Every place that must emit `[]` uses this.
-Json.EMPTY_ARRAY = setmetatable({}, { __tostring = function() return "[]" end })
+-- A sentinel value you substitute once you already know the list came out
+-- empty was the first shape of this, and it was wrong for a list built by a
+-- loop that may or may not get anything: the check happens far away from the
+-- loop, in a different function, usually written by somebody who has forgotten
+-- the loop exists.
+--
+-- Json.array marks the table itself. It stays a list whether the loop put
+-- twenty things in it or none, and the decision is made where the list is
+-- built, once, next to the code that knows what the list is FOR.
+Json.ARRAY = { __jsonarray = true }
+
+function Json.array(list)
+    return setmetatable(list or {}, Json.ARRAY)
+end
 -- }}}
 
 -- {{{ ESCAPES
@@ -75,6 +86,31 @@ end
 -- come out as an array or it stops being ordered, and an ordered thing that
 -- silently became unordered is a receipt whose steps cannot be replayed.
 local function is_array(value)
+    -- An EMPTY table is ambiguous and Lua cannot resolve it: {} is equally a
+    -- list with nothing in it and a record with no fields. Guessing "object"
+    -- was the wrong guess. A page that does `state.conversations.map(...)` on
+    -- a day with no conversations gets "map is not a function", the exception
+    -- unwinds the whole render, and every section BELOW the empty one draws
+    -- nothing. That is exactly how "no prior logs" blanked the receipts, the
+    -- world count and the vocabulary at once.
+    --
+    -- So the ambiguity is removed at the source instead of being guessed at:
+    -- a table passed through Json.array is marked as a list and stays a list
+    -- when it empties out.
+    -- Recognised by a NAMED FIELD on the metatable, not by the metatable's
+    -- identity.
+    --
+    -- `sibling()` loads modules with dofile, which re-executes the file, so
+    -- two parts of the same program hold two different copies of this module
+    -- and two different Json.ARRAY tables. Identity comparison across them is
+    -- always false -- which is exactly how a list marked in Menu.state came out
+    -- as `{}` from the router's own copy of the encoder. A field is the same
+    -- field in every copy.
+    local marker = getmetatable(value)
+    if marker and marker.__jsonarray then
+        return true
+    end
+
     local count = 0
     for _ in pairs(value) do
         count = count + 1
@@ -126,8 +162,18 @@ end
 function Json.encode(value, indent, _depth)
     _depth = _depth or 0
 
-    if value == Json.EMPTY_ARRAY then
-        return "[]"
+    -- `indent` is the string put in front of each nesting level, not a count of
+    -- spaces. Passing 2 makes string.rep(2, depth) produce "22", so every line
+    -- of a pretty-printed document is prefixed with digits and the JSON is
+    -- still perfectly valid -- which is exactly the shape of bug that survives
+    -- a glance at the output and is found much later by whatever reads it.
+    if indent ~= nil and type(indent) ~= "string" then
+        error(string.format(
+            "Json.encode: indent must be the string put before each level, not "
+         .. "a %s (%s).\n"
+         .. "  Pass \"  \" for two spaces. A number silently produces a document\n"
+         .. "  indented with digits, which is still valid JSON and still wrong.",
+            type(indent), tostring(indent)), 2)
     end
 
     local kind = type(value)

@@ -28,7 +28,7 @@ Errors are **returned, not thrown** — the main consumer is a network response,
 where malformed is an ordinary event to report rather than an exceptional one to
 crash on.
 
-### `Json.EMPTY_ARRAY`
+### `Json.array(list)`
 A sentinel that encodes as `[]`. Lua cannot distinguish an empty array from an
 empty object, and guessing is how a tool call arrives with `{}` where the API
 wanted `[]`.

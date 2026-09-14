@@ -51,7 +51,7 @@ check_error("infinity refuses", function() Json.encode(math.huge) end)
 -- Arrays and objects
 check("array",        Json.encode({1, 2, 3}), "[1,2,3]")
 check("empty table is an object", Json.encode({}), "{}")
-check("explicit empty array",     Json.encode(Json.EMPTY_ARRAY), "[]")
+check("a marked empty list",      Json.encode(Json.array()),     "[]")
 check("object",       Json.encode({name = "Grast"}), '{"name":"Grast"}')
 
 -- Keys are sorted, so two encodings of the same data are byte-identical.
