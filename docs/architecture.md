@@ -249,6 +249,11 @@ This is the design position from the vision document, stated mechanically: the
 model's reach is exactly the union of the registered operations' effects, and
 that union is enumerable, reviewable, and small.
 
+Enumerated, it is `docs/vocabulary.txt` — every word, its hands, whether it can
+be undone, and what it takes as arguments, on one line each. That document is
+generated from the declarations rather than written, by `scripts/vocabulary`,
+so a set that is reviewable in principle is also reviewable on a Tuesday.
+
 ## Asking
 
 Phase 8 adds one more entry point in front of the toolbox.

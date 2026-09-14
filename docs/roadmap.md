@@ -259,6 +259,35 @@ into the story props for its queststorydungeon.
 
 ---
 
+## Phase 12 — Likeness
+
+**Effect: things can look like something the game never shipped.**
+
+The one phase with a wall through the middle of it.
+
+The server holds no art. It holds a **display id** and hands it to the client,
+which looks the number up in a file it shipped with in 2010. So changing what
+something looks like is a database write when the new look is one of the 21,381
+displays already in the game — and a patch archive every player installs when it
+is not.
+
+Everything on the near side works today. Everything on the far side needs a
+2010 model format with a rig, and a distribution story this project does not
+have. The near side is built first and **announces that it is standing in for
+the far side** every time it runs (issue 109), so the placeholder is never
+mistaken for the finished thing.
+
+| Issue | Title |
+|-------|-------|
+| 1200 | What a model actually is, and where the wall is |
+| 1201 | `creature.reskin` — change a look, using what already ships |
+| 1202 | The larder — keeping what was found, with its licence |
+| 1203 | The scrapers — finding art out there **[the empty half]** |
+| 1204 | Crossing the wall — a downloaded file becomes something the game shows |
+| 1205 | "Change that goblin" — the sentence, resolved against what is in view |
+
+---
+
 ## Phase Completion
 
 For each phase:

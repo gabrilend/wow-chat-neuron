@@ -26,6 +26,37 @@ earlier in the count if that is where it belongs in the telling.
 | 014 | `src/014-return.lua` | Putting it back, from the receipt. |
 | 015 | `src/015-retire.lua` | Removing characters completely. The one thing with no reverse. |
 | 016 | `src/016-dangling.lua` | Proving a removal was complete, and catching one that was not. |
+| 017 | `src/017-creature-types.lua` | What kind of thing a creature is, and how dangerous. |
+| 018 | `src/018-bestiary.lua` | `world.creatures` -- the first read a model can use to look. |
+| 024 | `src/024-load.lua` | Load a file once, so identity survives being reached twice. |
+| 025 | `src/025-enums/` | The closed sets, as members you can compare by identity. |
+| 026 | `src/025-enums/026-enum.lua` | What an enum is here, and why a member is a table. |
+| 027 | `src/025-enums/027-hands.lua` | cold, live, resident, none. |
+| 028 | `src/025-enums/028-kinds.lua` | read, change, final -- what running a word costs. |
+| 029 | `src/025-enums/029-refusals.lua` | The four kinds of no. |
+| 030 | `src/025-enums/030-slots.lua` | The nineteen equipment slots. |
+| 031 | `src/025-enums/031-stats.lua` | The five primary attributes. |
+| 032 | `src/025-enums/032-classes.lua` | The nine classes, their ids and their colours. |
+| 033 | `src/033-mechanisms/` | The hands, given one doorway. |
+| 034 | `src/033-mechanisms/034-mechanism.lua` | The shape all four share, and the routing table. |
+| 035 | `src/033-mechanisms/035-cold.lua` | A database write. |
+| 036 | `src/033-mechanisms/036-live.lua` | One game master command. |
+| 037 | `src/033-mechanisms/037-resident.lua` | A script left running inside the world. |
+| 038 | `src/033-mechanisms/038-none.lua` | No reach at all, on purpose. |
+| 039 | `src/039-memory/` | What a creature holds, and for how long. |
+| 040 | `src/039-memory/040-relevance.lua` | Which of its memories it is attending to right now. |
+| 041 | `src/041-vision/` | Seeing, rather than querying. |
+| 042 | `src/041-vision/042-camera.lua` | Where to stand to look at something, and what a pixel means. |
+| 043 | `src/041-vision/043-adjectives.lua` | The spatial words, and which of them cost a raycast. |
+| 044 | `src/041-vision/044-regions.lua` | A thing in a picture, and pointing at a named part of it. |
+| 045 | `src/045-toolbox/` | Every word in one table, and that table as a tool list. |
+| 046 | `src/045-toolbox/046-types.lua` | What a parameter can be, and what it becomes to a model. |
+| 047 | `src/045-toolbox/047-registry.lua` | The closed set, keyed by name, refusing half-declared words. |
+| 048 | `src/045-toolbox/048-schema.lua` | The registry as JSON Schema, and a tool call routed back. |
+| 049 | `src/049-spawn.lua` | `world.spawn` -- the first word that creates anything. |
+| 050 | `src/050-api.lua` | One HTTPS request to a model, through curl. |
+| 051 | `src/051-loop.lua` | A sentence in, a plan out. The last piece of the pipeline. |
+| 019 | `src/019-vocabulary.lua` | The closed set as declarations, and the renderer that prints it. |
 | 020 | `src/020-cli.lua` | The command line, so a person can pull the levers with no model involved. |
 | 021 | `src/021-chat-router.lua` | A sentence becomes an operation. The substrate a model will write to. |
 | 022 | `src/022-http-server.lua` | Three routes, so the window has something to talk to. |
