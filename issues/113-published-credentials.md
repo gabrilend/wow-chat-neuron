@@ -173,13 +173,10 @@ These are unanswered and this ticket is not finished while they are.
 
    They also *cannot* be edited in the ordinary way: a transcript is not written
    by hand, it is rendered from a Claude session log by
-   `scripts/backup-conversations` in the shared tooling. Editing the file just
-   means the next rebuild silently reverts it. Editing the renderer would rewrite
-   every transcript in every project at once.
-
-   A separate concern came out of looking: the renderer *does* rebuild files
-   already committed, and nothing shows it happening. See the transcript
-   immutability ticket in the shared scripts project.
+   `scripts/backup-conversations` in the shared tooling, which the harness runs
+   after **every turn**, in every project. An edit survives until the end of the
+   turn that made it. Editing the renderer instead would rewrite every transcript
+   in every project at once.
 
 4. **What does the check do about a deployment it cannot read?** A stock
    AzerothCore that neuron has been pointed at may have credentials neuron has no
