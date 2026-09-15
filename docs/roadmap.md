@@ -31,6 +31,7 @@ exist, how many are online, and which hands are currently usable.
 | 105 | Reading the world — characters, positions, online state |
 | 106 | Receipts — the append-only record of what was done |
 | 111 | The plain WotLK target platform (work lands in the deployment) |
+| 113 | Published credentials — refusing to go public with a known password |
 
 ---
 

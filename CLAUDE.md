@@ -87,6 +87,18 @@ mod-eluna scripts. E001 symlinks the profile-matching dir into
 - Credentials: ritz / menardi
 - Databases: acore_auth, acore_characters, acore_world, acore_playerbots
 
+**This password is published.** It is on the line above, in a file tracked by git
+in a repository pushed to a public remote, and it is in four more files here and
+five in wow-chat-2026. That costs nothing while MySQL is bound to `127.0.0.1` and
+the realm is unreachable, and it costs everything the day either stops being
+true — with no event in between to notice.
+
+So: **the password must be changed before this server is reachable from outside
+this machine.** Not afterwards, and not as part of the same sitting. See
+`issues/113-published-credentials.md`, which is blocked by nothing and blocks
+exactly one thing: going public. It specifies the check that makes this a refusal
+rather than a paragraph, because a paragraph is a thing you have already read.
+
 ## Modules Installed
 
 - **mod-ale** - Lua scripting engine (hot-reload capable)
