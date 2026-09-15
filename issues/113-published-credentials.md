@@ -10,8 +10,16 @@
 ## Current Behavior
 
 The deployment's MySQL account — user `ritz`, password `menardi`, port 3307 — is
-written in plain text in files that are tracked by git, in both repositories, and
-the neuron repository is being pushed to a public remote.
+written in plain text in files tracked by git in **both repositories, and both
+repositories are public.** Confirmed rather than inferred: an anonymous
+`git ls-remote` with the credential helper disabled returns refs for
+`gabrilend/wow-chat-neuron` and `gabrilend/wow-chat-2026` alike.
+
+wow-chat-2026 has carried it since its first commit, `3bd871e`, dated
+2026-01-28. So this is not a credential that is *about* to be published. It is
+one that has been readable for months, and no rewriting of history changes that
+— a published credential is published from the moment somebody fetches it, not
+from the moment somebody notices.
 
 Where it is, in this repository:
 
@@ -143,21 +151,35 @@ worse off than having no check at all.
 
 These are unanswered and this ticket is not finished while they are.
 
-1. **Does changing the MySQL password belong to neuron or to wow-chat-2026?**
-   The account is created by a script in the other repository and written into
-   generated configs by a config patch there. neuron can detect the problem but
-   cannot fix it. Does this ticket end at the refusal, with a sibling ticket in
-   the other project doing the rotation?
+1. ~~**Does changing the MySQL password belong to neuron or to wow-chat-2026?**~~
+   **Answered: the other project, and it has a ticket.** The account is created
+   there and written into generated configs by a config patch there, so neuron
+   can see the problem and cannot fix it. wow-chat-2026's issue 107 —
+   originally *"Credential Manager Script"*, filed in April and overtaken twice
+   since — now carries the rotation. **This ticket detects; that one rotates.**
+   Neither is finished until both are.
 
 2. **What about the realm hostname?** `wow.ritzmenardi.com` is published in the
    same file as the password. A hostname is not a credential and does not rotate.
    Is publishing it a problem to solve, a thing to accept, or a reason to move
    the realm to a name that was always meant to be public?
 
-3. **Do the transcripts count?** They carry the password in a dozen places and
-   they are conversation records, kept deliberately and appended to rather than
-   edited. Scrubbing them means rewriting the record of what was actually said.
-   Is the answer that the password rotates and the transcripts keep the dead one?
+3. ~~**Do the transcripts count?**~~ **Answered: no, and they must not be
+   touched.** The password is being rotated, so what the transcripts carry is a
+   dead string, and a dead password in a record of what was said is a fact about
+   the past rather than a secret. Scrubbing them would mean editing the record
+   to make the past agree with the present, which is the one thing this project
+   has said repeatedly it will not do.
+
+   They also *cannot* be edited in the ordinary way: a transcript is not written
+   by hand, it is rendered from a Claude session log by
+   `scripts/backup-conversations` in the shared tooling. Editing the file just
+   means the next rebuild silently reverts it. Editing the renderer would rewrite
+   every transcript in every project at once.
+
+   A separate concern came out of looking: the renderer *does* rebuild files
+   already committed, and nothing shows it happening. See the transcript
+   immutability ticket in the shared scripts project.
 
 4. **What does the check do about a deployment it cannot read?** A stock
    AzerothCore that neuron has been pointed at may have credentials neuron has no

@@ -87,11 +87,12 @@ mod-eluna scripts. E001 symlinks the profile-matching dir into
 - Credentials: ritz / menardi
 - Databases: acore_auth, acore_characters, acore_world, acore_playerbots
 
-**This password is published.** It is on the line above, in a file tracked by git
-in a repository pushed to a public remote, and it is in four more files here and
-five in wow-chat-2026. That costs nothing while MySQL is bound to `127.0.0.1` and
-the realm is unreachable, and it costs everything the day either stops being
-true — with no event in between to notice.
+**This password is published.** Not "would be" — it is. It is on the line above,
+in a file tracked by git in a public repository, and it is in four more files
+here and in 41 tracked files in wow-chat-2026, which has been public with it
+since its first commit in January. That costs nothing while MySQL is bound to
+`127.0.0.1` and the realm is unreachable, and it costs everything the day either
+stops being true — with no event in between to notice.
 
 So: **the password must be changed before this server is reachable from outside
 this machine.** Not afterwards, and not as part of the same sitting. See
