@@ -8,6 +8,7 @@ indexed by `docs/reading-order.md`.
 
 ```
 wow-chat-neuron/
+├── README.md                           What neuron is, what it can do, and how to point it at a server
 ├── LICENSE.md                          Why an old version of WoW, and the standing
 │
 ├── notes/
